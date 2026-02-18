@@ -651,6 +651,227 @@ describe("api-key-manager", () => {
     expect(apiKey.rateLimit).to.equal(10);
   });
 
+  it("enforces max_keys limit", async () => {
+    // Create a service with max_keys = 2
+    const limitOwner = Keypair.generate();
+    const airdropSig = await provider.connection.requestAirdrop(
+      limitOwner.publicKey,
+      5_000_000_000
+    );
+    await provider.connection.confirmTransaction(airdropSig);
+
+    const [limitServicePDA] = findServicePDA(
+      limitOwner.publicKey,
+      program.programId
+    );
+
+    await program.methods
+      .initializeService("Limited Service", 2, 1000, new anchor.BN(3600))
+      .accounts({
+        serviceConfig: limitServicePDA,
+        owner: limitOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([limitOwner])
+      .rpc();
+
+    // Create 2 keys (should succeed)
+    for (let i = 0; i < 2; i++) {
+      const key = generateApiKey();
+      const keyHash = hashApiKey(key);
+      const [keyPDA] = findApiKeyPDA(limitServicePDA, keyHash, program.programId);
+
+      await program.methods
+        .createKey(Array.from(keyHash), `Key ${i}`, 3, null, null)
+        .accounts({
+          serviceConfig: limitServicePDA,
+          apiKey: keyPDA,
+          owner: limitOwner.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([limitOwner])
+        .rpc();
+    }
+
+    // 3rd key should fail
+    const key3 = generateApiKey();
+    const keyHash3 = hashApiKey(key3);
+    const [keyPDA3] = findApiKeyPDA(limitServicePDA, keyHash3, program.programId);
+
+    try {
+      await program.methods
+        .createKey(Array.from(keyHash3), "Key 2", 3, null, null)
+        .accounts({
+          serviceConfig: limitServicePDA,
+          apiKey: keyPDA3,
+          owner: limitOwner.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([limitOwner])
+        .rpc();
+      expect.fail("Should have thrown — max keys reached");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("MaxKeysReached");
+    }
+  });
+
+  it("validates all permission bitmask values", async () => {
+    // Create key with ADMIN permission (8) and full permissions (15)
+    const keyAdmin = generateApiKey();
+    const keyHashAdmin = hashApiKey(keyAdmin);
+    const [apiKeyPDAAdmin] = findApiKeyPDA(
+      servicePDA,
+      keyHashAdmin,
+      program.programId
+    );
+
+    await program.methods
+      .createKey(
+        Array.from(keyHashAdmin),
+        "Admin Key",
+        15, // READ | WRITE | DELETE | ADMIN
+        null,
+        null
+      )
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAAdmin,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const apiKey = await program.account.apiKey.fetch(apiKeyPDAAdmin);
+    expect(apiKey.permissions).to.equal(15);
+    expect(apiKey.permissions & 1).to.equal(1); // READ
+    expect(apiKey.permissions & 2).to.equal(2); // WRITE
+    expect(apiKey.permissions & 4).to.equal(4); // DELETE
+    expect(apiKey.permissions & 8).to.equal(8); // ADMIN
+  });
+
+  it("close key decrements active_keys for non-revoked key", async () => {
+    // Create a key, then close it without revoking first
+    const keyClose = generateApiKey();
+    const keyHashClose = hashApiKey(keyClose);
+    const [apiKeyPDAClose] = findApiKeyPDA(
+      servicePDA,
+      keyHashClose,
+      program.programId
+    );
+
+    await program.methods
+      .createKey(Array.from(keyHashClose), "Close Test", 3, null, null)
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAClose,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const serviceBefore = await program.account.serviceConfig.fetch(servicePDA);
+    const activeKeysBefore = serviceBefore.activeKeys;
+
+    // Close without revoking
+    await program.methods
+      .closeKey()
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAClose,
+        owner: owner.publicKey,
+      })
+      .rpc();
+
+    const serviceAfter = await program.account.serviceConfig.fetch(servicePDA);
+    expect(serviceAfter.activeKeys).to.equal(activeKeysBefore - 1);
+  });
+
+  it("rejects validate_key on revoked key", async () => {
+    // apiKeyPDA was revoked earlier in the test suite
+    try {
+      await program.methods
+        .validateKey()
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDA,
+        })
+        .rpc();
+      expect.fail("Should have thrown — key is revoked");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("KeyRevoked");
+    }
+  });
+
+  it("update key with new expiry", async () => {
+    const keyUpd = generateApiKey();
+    const keyHashUpd = hashApiKey(keyUpd);
+    const [apiKeyPDAUpd] = findApiKeyPDA(
+      servicePDA,
+      keyHashUpd,
+      program.programId
+    );
+
+    await program.methods
+      .createKey(Array.from(keyHashUpd), "Update Expiry", 3, null, null)
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAUpd,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const futureExpiry = Math.floor(Date.now() / 1000) + 7200;
+
+    await program.methods
+      .updateKey(null, null, new anchor.BN(futureExpiry))
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAUpd,
+        owner: owner.publicKey,
+      })
+      .rpc();
+
+    const apiKey = await program.account.apiKey.fetch(apiKeyPDAUpd);
+    expect(apiKey.expiresAt.toNumber()).to.equal(futureExpiry);
+  });
+
+  it("rejects update with past expiry", async () => {
+    const keyUpdPast = generateApiKey();
+    const keyHashUpdPast = hashApiKey(keyUpdPast);
+    const [apiKeyPDAUpdPast] = findApiKeyPDA(
+      servicePDA,
+      keyHashUpdPast,
+      program.programId
+    );
+
+    await program.methods
+      .createKey(Array.from(keyHashUpdPast), "Past Expiry", 3, null, null)
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAUpdPast,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const pastExpiry = Math.floor(Date.now() / 1000) - 3600;
+
+    try {
+      await program.methods
+        .updateKey(null, null, new anchor.BN(pastExpiry))
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDAUpdPast,
+          owner: owner.publicKey,
+        })
+        .rpc();
+      expect.fail("Should have thrown — past expiry");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("InvalidExpiry");
+    }
+  });
+
   it("supports all three window durations", async () => {
     // Create services with each window type to verify they're accepted
     const windowTests = [
