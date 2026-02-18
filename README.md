@@ -1,20 +1,24 @@
 # On-Chain API Key Management System
 
-A traditional API key management backend rebuilt as a Solana program (Anchor framework), demonstrating how familiar Web2 authentication and authorization patterns can be implemented using on-chain architecture.
+A traditional API key management backend rebuilt as a Solana program (Anchor framework), demonstrating how familiar Web2 authentication and authorization patterns translate to on-chain architecture.
 
-Built for the [Superteam "Rebuild Production Backend Systems as On-Chain Rust Programs"](https://earn.superteam.fun/listings/bounties/rebuild-production-backend-systems-as-on-chain-rust-programs/) challenge.
+Built for the [Superteam "Rebuild Production Backend Systems as On-Chain Rust Programs"](https://earn.superteam.fun/listings/bounties/rebuild-production-backend-systems-as-on-chain-rust-programs/) bounty.
 
-## How This Works in Web2
+## Why This System?
 
-Traditional API key management systems are a solved problem in Web2, typically consisting of:
+API key management is ubiquitous in Web2 — every major SaaS product has one. It's a well-understood pattern, which makes it ideal for demonstrating exactly what changes (and what doesn't) when you move backend logic on-chain. The core concepts — cryptographic key generation, hash-based storage, permission bitmasks, rate limiting — translate remarkably well to Solana's account model. But the *trust model* is completely different.
 
-1. **Database table**: Stores API keys with associated metadata (owner, permissions, rate limits, creation/expiry timestamps). Usually PostgreSQL or DynamoDB.
-2. **Key generation**: Server generates cryptographically random tokens (e.g., `sk_live_...`), stores a SHA-256 hash in the database, returns the raw key to the user exactly once.
-3. **Middleware validation**: On every API request, middleware extracts the key from the `Authorization` header, hashes it, looks up the hash in the database, and checks permissions and rate limits.
-4. **Rate limiting**: An in-memory store (Redis, Memcached) or sliding window counter tracks requests per key per time window. Sub-millisecond lookups.
-5. **Admin operations**: CRUD endpoints for creating, listing, updating permissions, revoking, and deleting keys. Typically behind an admin dashboard.
+## How It Works in Web2
 
-**Architecture**: Centralized server + database. Single point of failure. The service operator has complete control over key lifecycle, including the ability to modify rate limits, permissions, or revoke keys silently.
+Traditional API key management:
+
+1. **Database table**: Stores key hashes, permissions, rate limits, expiry. PostgreSQL or DynamoDB.
+2. **Key generation**: Server generates `sk_live_...` tokens, stores SHA-256 hash, returns raw key once.
+3. **Middleware**: On each request, extracts key from `Authorization` header → hash → DB lookup → check permissions and rate limits.
+4. **Rate limiting**: Redis/Memcached sliding window counter. Sub-millisecond lookups.
+5. **Admin ops**: CRUD endpoints behind admin dashboard.
+
+**Trust model**: Users trust the operator to honestly manage keys, enforce rate limits fairly, and not tamper with usage data. There is no way to independently verify any of this.
 
 ```
 Client → API Gateway → Auth Middleware → Backend Service
@@ -22,55 +26,57 @@ Client → API Gateway → Auth Middleware → Backend Service
                     Redis (rate limits)   PostgreSQL (keys table)
 ```
 
-**Trust model**: Users trust the service operator to honestly manage their keys, enforce rate limits fairly, and not tamper with usage data. There is no way for a user to independently verify their key's configuration or usage history.
-
-## How This Works on Solana
-
-This program reimagines the same system using Solana's account model as a distributed state machine:
+## How It Works on Solana
 
 ### Account Model (replacing the database)
 
-Instead of database rows, each entity is a **Program Derived Address (PDA)** — a deterministic account whose address is derived from seeds and owned by the program.
+Each entity is a **Program Derived Address (PDA)** — deterministic, program-owned, and verifiable by anyone:
 
-- **ServiceConfig PDA** `[b"service", owner_pubkey]`: Represents the API service itself. Stores service-level configuration (name, max keys, default rate limit, window duration). One service per owner wallet.
-- **ApiKey PDA** `[b"apikey", service_pubkey, key_hash]`: Each API key is a separate on-chain account. Stores the key hash, permission bitmask, per-window usage counter, timestamps, and revocation status.
+- **ServiceConfig PDA** `[b"service", owner_pubkey]` — The API service. One per owner wallet.
+- **ApiKey PDA** `[b"apikey", service_pubkey, key_hash]` — Individual API key. O(1) lookup by hash.
 
 ### Instruction Set (replacing REST endpoints)
 
-| Instruction | Web2 Equivalent | Access Control |
-|-------------|----------------|----------------|
-| `initialize_service` | `POST /services` | Anyone (creates PDA owned by signer) |
-| `create_key` | `POST /keys` | Service owner only |
-| `validate_key` | `GET /keys/:hash/validate` | Anyone (read-only) |
-| `record_usage` | Middleware counter increment | Service owner only |
-| `update_key` | `PATCH /keys/:hash` | Service owner only |
-| `revoke_key` | `DELETE /keys/:hash` (soft) | Service owner only |
-| `close_key` | `DELETE /keys/:hash` (hard) | Service owner only |
+| Instruction | Web2 Equivalent | Access | Notes |
+|-------------|----------------|--------|-------|
+| `initialize_service` | `POST /services` | Anyone | Creates PDA owned by signer |
+| `update_service` | `PATCH /services/:id` | Owner only | Update name, limits, window |
+| `create_key` | `POST /keys` | Owner only | Stores hash, never raw key |
+| `validate_key` | `GET /keys/:hash/validate` | Anyone | Free RPC read (no tx needed) |
+| `check_permission` | Authorization middleware | Anyone | On-chain permission check |
+| `record_usage` | Middleware counter | Owner only | Prevents usage griefing |
+| `update_key` | `PATCH /keys/:hash` | Owner only | Modify perms, limits, expiry |
+| `revoke_key` | `DELETE /keys/:hash` (soft) | Owner only | Soft-disable |
+| `close_key` | `DELETE /keys/:hash` (hard) | Owner only | Delete + reclaim rent |
 
-### Key Design Decisions
-
-1. **Hash-based key lookup**: Raw API keys never touch the chain. Only SHA-256 hashes are stored, exactly like Web2 best practice. The PDA address is derived from the hash, enabling O(1) lookups without scanning.
-
-2. **Bitmask permissions**: Permissions use a `u16` bitmask (`READ=1, WRITE=2, DELETE=4, ADMIN=8`), enabling composable permission sets in a single field. This mirrors Unix file permissions and is gas-efficient.
-
-3. **On-chain rate limiting**: Each key tracks `window_usage` (current count) and `window_start` (timestamp). When `clock.unix_timestamp - window_start >= rate_limit_window`, the counter resets. Windows are fixed at 60s, 3600s, or 86400s to prevent abuse via micro-windows.
-
-4. **Owner-gated usage recording**: Only the service owner can call `record_usage`, preventing denial-of-service attacks where an attacker inflates a key's usage counter to exhaust its rate limit. The tradeoff is that the owner's backend must sign these transactions.
-
-5. **Rent reclamation**: `close_key` returns the account's rent-exempt balance to the owner, incentivizing cleanup of unused keys.
-
-**Architecture**: State stored on Solana validators worldwide. No single point of failure. All key operations are transparently auditable on-chain.
+**Trust model**: All key state is publicly verifiable. Users can independently check their key's configuration, permissions, usage counts, and rate limit status. The service owner cannot silently modify or tamper with this data — every change is a signed transaction on-chain.
 
 ```
-Client → Your Backend → Validate key (RPC read, free)
-                      → Record usage (Solana tx, ~$0.000005)
-                      → Manage keys (Solana tx, ~$0.000005)
+Client → Your Backend → validate_key (free RPC read)
+                      → check_permission (free RPC read)
+                      → record_usage (Solana tx, ~$0.000005)
 
 Key state lives on-chain in PDAs:
   ServiceConfig PDA ← owns → ApiKey PDA 1
                            → ApiKey PDA 2
                            → ApiKey PDA N
 ```
+
+### Design Decisions
+
+1. **Hash-based key lookup**: Raw API keys never touch the chain. Only SHA-256 hashes are stored, matching Web2 best practice. PDA address is derived from the hash for O(1) lookups.
+
+2. **Bitmask permissions**: `u16` bitmask (`READ=1, WRITE=2, DELETE=4, ADMIN=8`) enables composable permission sets in a single field. The `check_permission` instruction validates bits on-chain, and `is_valid()` prevents setting undefined bits.
+
+3. **On-chain rate limiting**: Each key tracks `window_usage` and `window_start`. Counter resets when `elapsed >= rate_limit_window`. Windows fixed to 60/3600/86400 seconds to prevent abuse via micro-windows.
+
+4. **Owner-gated usage recording**: Only the service owner can call `record_usage`. This prevents DoS attacks where an attacker inflates a key's usage counter to exhaust its rate limit. The tradeoff: the owner's backend must sign these transactions.
+
+5. **Rent reclamation**: `close_key` returns the account's rent-exempt balance to the owner. At ~0.002 SOL per key, this incentivizes cleanup and makes key lifecycle management cost-neutral.
+
+6. **Permission validation**: The `check_permission` instruction lets any caller verify a key has specific permissions without reading the full account client-side. Combined with `validate_key`, this enables a two-step authorization pattern: validate → check permission → record usage.
+
+7. **Service mutability**: `update_service` allows config changes without redeployment. Critical for production: change rate limits, expand key capacity, or rename — all without touching existing keys.
 
 ## Tradeoffs & Constraints
 
@@ -82,94 +88,35 @@ Key state lives on-chain in PDAs:
 | **Usage recording latency** | ~1ms (Redis INCR) | ~400-500ms (tx confirmation) |
 | **Cost per validation** | Free (internal) | Free (RPC read, no tx needed) |
 | **Cost per usage record** | Free (internal compute) | ~$0.000005 (tx fee) |
-| **Cost per key creation** | Free (DB insert) | ~$0.002 (rent deposit + tx fee) |
+| **Cost per key creation** | Free (DB insert) | ~$0.002 (rent deposit, reclaimable) |
 | **Key storage cost** | ~$0.01/mo (DB row) | ~$0.001 one-time (rent-exempt, reclaimable) |
-| **Max throughput** | 100K+ ops/sec (Redis) | ~1,500 TPS (dedicated, with priority fees) |
-| **Auditability** | Requires application logging | Built-in (all txs on-chain, immutable) |
-| **Availability** | 99.9% (single region) / 99.99% (multi-region) | ~99.5% (network-wide, historical) |
-| **Data sovereignty** | Operator controls all data | Data on public chain, program controls access |
-| **Key privacy** | Raw keys in DB (if not hashed) | Only hashes on-chain (raw keys stay off-chain) |
+| **Max throughput** | 100K+ ops/sec (Redis) | ~1,500 TPS (global network) |
+| **Auditability** | Application logs (mutable) | On-chain (immutable, public) |
+| **Data sovereignty** | Operator owns data | Data on public chain |
 | **Admin tampering** | Possible (DB access) | Impossible (constrained by program logic) |
-| **Rate limit precision** | Exact (atomic in-memory counter) | Approximate (~0.4s slot time granularity) |
+| **Rate limit precision** | Exact (atomic counter) | ~0.4s granularity (slot time) |
 
-### Where Solana Makes Sense
+### Where On-Chain Wins
 
-- **Multi-party API marketplaces**: Multiple providers share a decentralized key registry. No single operator can tamper with keys or usage data.
-- **Trustless B2B integrations**: Business partners can independently verify their API key configuration and usage without trusting the other party's reporting.
-- **Transparent SLA enforcement**: Rate limits and usage are publicly auditable, enabling trustless SLA verification.
-- **Cross-service SSO-like patterns**: One API key PDA could be validated by multiple services via CPI, enabling decentralized single-sign-on.
-- **Censorship-resistant APIs**: No central authority can revoke access unilaterally; only the service owner (via their wallet) can manage keys.
+- **Multi-party API marketplaces**: Decentralized key registry. No operator can tamper with keys or usage data.
+- **Trustless B2B integrations**: Partners verify key config and usage independently.
+- **Transparent SLA enforcement**: Publicly auditable rate limits and usage.
+- **Cross-service authorization**: One API key PDA validated by multiple services via CPI.
+- **Censorship-resistant APIs**: Only the owner wallet can manage keys.
 
-### Where Web2 Is Better
+### Where Web2 Wins
 
-- **High-throughput single-service APIs**: If you need >10K validations/sec with sub-millisecond latency, an in-memory solution wins.
-- **Privacy-sensitive key metadata**: All on-chain data is public. If key labels or permission structures are sensitive, Web2's database access control is more appropriate.
-- **Cost-sensitive high-volume writes**: At millions of usage records per day, even $0.000005/tx adds up. Web2's internal operations are free.
-- **Complex rate limiting**: Sliding windows, burst allowances, token bucket algorithms — these are trivial in Redis but complex/expensive to implement on-chain.
+- **High-throughput APIs**: >10K validations/sec with sub-ms latency.
+- **Privacy**: All on-chain data is public. Sensitive metadata needs Web2.
+- **High-volume writes**: Millions of usage records/day — even $0.000005/tx adds up.
+- **Complex rate limiting**: Sliding windows, burst allowances, token bucket — trivial in Redis, complex on-chain.
 
 ### Solana-Specific Constraints
 
-- **One service per wallet**: PDA seeds `[b"service", owner_pubkey]` limit each wallet to one service. Multiple services require multiple wallets (or adding a service ID to the seeds).
-- **Slot-time granularity**: `Clock::get()?.unix_timestamp` has ~400ms granularity (Solana slot time). Rate limits are not exactly precise to the second.
-- **Account size is fixed at creation**: `ApiKey` and `ServiceConfig` accounts allocate their maximum size upfront. Dynamic-length fields (like `label`) use `#[max_len(32)]`.
-- **Rent costs**: Each API key PDA costs ~0.002 SOL in rent-exempt deposit. This is reclaimable via `close_key` but represents upfront capital.
-
-## Program Architecture
-
-```
-┌───────────────────────────────────────────────────────┐
-│                 api_key_manager Program                │
-├───────────────────────────────────────────────────────┤
-│                                                       │
-│  Instructions:                                        │
-│  ├── initialize_service  → Create ServiceConfig PDA   │
-│  ├── create_key          → Create ApiKey PDA          │
-│  ├── validate_key        → Check key validity (read)  │
-│  ├── record_usage        → Increment usage counter    │
-│  ├── update_key          → Modify permissions/limits  │
-│  ├── revoke_key          → Soft-disable a key         │
-│  └── close_key           → Delete key, reclaim rent   │
-│                                                       │
-│  Accounts (PDAs):                                     │
-│  ├── ServiceConfig [b"service", owner]                │
-│  │   ├── owner: Pubkey                                │
-│  │   ├── name: String (max 32)                        │
-│  │   ├── max_keys: u32                                │
-│  │   ├── default_rate_limit: u32                      │
-│  │   ├── rate_limit_window: i64 (60|3600|86400)       │
-│  │   ├── total_keys_created: u32                      │
-│  │   └── active_keys: u32                             │
-│  │                                                    │
-│  └── ApiKey [b"apikey", service, key_hash]             │
-│      ├── service: Pubkey                              │
-│      ├── key_hash: [u8; 32]                           │
-│      ├── label: String (max 32)                       │
-│      ├── permissions: u16 (bitmask)                   │
-│      ├── rate_limit: u32                              │
-│      ├── rate_limit_window: i64                       │
-│      ├── window_usage: u32 / window_start: i64        │
-│      ├── total_usage: u64                             │
-│      ├── created_at: i64 / expires_at: i64            │
-│      └── revoked: bool                                │
-│                                                       │
-│  Errors:                                              │
-│  ├── NameTooLong, InvalidConfig, InvalidWindow        │
-│  ├── MaxKeysReached, KeyRevoked, KeyExpired            │
-│  ├── RateLimitExceeded, InvalidExpiry                 │
-│  └── AlreadyRevoked, InvalidService, Overflow         │
-│                                                       │
-│  Events (emitted for indexing):                       │
-│  ├── ServiceCreated, KeyCreated, UsageRecorded        │
-│  ├── KeyValidated, KeyRevoked, KeyUpdated, KeyClosed  │
-│                                                       │
-│  Security:                                            │
-│  ├── Owner-only: create, update, revoke, close, usage │
-│  ├── Permissionless: validate (read-only)             │
-│  ├── Checked arithmetic on all counters               │
-│  └── PDA seeds enforce account relationships          │
-│                                                       │
-└───────────────────────────────────────────────────────┘
-```
+- **One service per wallet**: PDA seeds `[b"service", owner]` limit each wallet to one service.
+- **Slot-time granularity**: Clock timestamps have ~400ms precision.
+- **Fixed account size**: Allocated upfront with `#[max_len(32)]`.
+- **Rent deposit**: ~0.002 SOL per key PDA (reclaimable via `close_key`).
 
 ## Security Model
 
@@ -177,13 +124,70 @@ Key state lives on-chain in PDAs:
 |--------------|------------|
 | **Key theft** | Raw keys never stored on-chain; only SHA-256 hashes |
 | **Usage griefing** | `record_usage` restricted to service owner (signer check) |
-| **Permission escalation** | `update_key` requires service owner signature |
-| **Unauthorized revocation** | `revoke_key` requires service owner signature |
+| **Permission escalation** | `update_key` requires owner signature; `is_valid()` rejects undefined bits |
+| **Unauthorized revocation** | `revoke_key` requires owner signature |
 | **Integer overflow** | All counter increments use `checked_add()` |
-| **Expired key usage** | `record_usage` checks `expires_at` against `Clock` |
+| **Expired key usage** | `record_usage` and `validate_key` check `expires_at` against `Clock` |
 | **Rate limit bypass** | Window reset requires elapsed time >= window duration |
 | **PDA spoofing** | Anchor validates PDA derivation against expected seeds |
-| **Rent drain** | `close_key` returns rent to owner, not arbitrary address |
+| **Rent drain** | `close_key` returns rent to owner via Anchor `close` constraint |
+| **Service takeover** | PDA seeded by owner pubkey + `has_one = owner` constraint |
+
+## Program Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  api_key_manager Program                  │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  Instructions (9):                                       │
+│  ├── initialize_service  → Create ServiceConfig PDA      │
+│  ├── update_service      → Modify service config         │
+│  ├── create_key          → Create ApiKey PDA             │
+│  ├── validate_key        → Check key validity (read)     │
+│  ├── check_permission    → Verify specific permissions   │
+│  ├── record_usage        → Increment usage counter       │
+│  ├── update_key          → Modify permissions/limits     │
+│  ├── revoke_key          → Soft-disable a key            │
+│  └── close_key           → Delete key, reclaim rent      │
+│                                                          │
+│  Accounts (PDAs):                                        │
+│  ├── ServiceConfig [b"service", owner]                   │
+│  │   ├── owner: Pubkey                                   │
+│  │   ├── name: String (max 32)                           │
+│  │   ├── max_keys: u32 (1-10,000)                        │
+│  │   ├── default_rate_limit: u32                         │
+│  │   ├── rate_limit_window: i64 (60|3600|86400)          │
+│  │   ├── total_keys_created: u32                         │
+│  │   ├── active_keys: u32                                │
+│  │   └── created_at: i64                                 │
+│  │                                                       │
+│  └── ApiKey [b"apikey", service, key_hash]                │
+│      ├── service: Pubkey                                 │
+│      ├── key_hash: [u8; 32]                              │
+│      ├── label: String (max 32)                          │
+│      ├── permissions: u16 (bitmask, validated)           │
+│      ├── rate_limit: u32 / rate_limit_window: i64        │
+│      ├── window_usage: u32 / window_start: i64           │
+│      ├── total_usage: u64                                │
+│      ├── created_at: i64 / last_used_at: i64             │
+│      ├── expires_at: i64 (0 = never)                     │
+│      └── revoked: bool                                   │
+│                                                          │
+│  Errors (13):                                            │
+│  ├── NameTooLong, InvalidConfig, InvalidWindow           │
+│  ├── MaxKeysReached, KeyRevoked, KeyExpired              │
+│  ├── RateLimitExceeded, InvalidExpiry, AlreadyRevoked    │
+│  ├── InvalidService, Overflow                            │
+│  └── InvalidPermissions, InsufficientPermissions         │
+│                                                          │
+│  Events (8):                                             │
+│  ├── ServiceCreated, ServiceUpdated                      │
+│  ├── KeyCreated, KeyValidated, PermissionChecked         │
+│  ├── UsageRecorded, KeyUpdated, KeyRevoked, KeyClosed    │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## Building & Testing
 
@@ -198,13 +202,24 @@ Key state lives on-chain in PDAs:
 anchor build
 ```
 
-### Test (28 test cases, local validator)
+### Test (45 test cases, local validator)
 ```bash
 npm install
 anchor test --validator legacy
 ```
 
-Tests cover: service initialization, key CRUD operations, permission bitmask validation, rate limit enforcement, expiry handling, access control (unauthorized usage recording), max keys limit, rent reclamation, and all three window durations.
+Test coverage includes:
+- Service initialization with all validation paths
+- Service updates (name, max_keys, rate_limit, window)
+- Key CRUD with permission bitmask validation
+- Permission checking (check_permission instruction)
+- Rate limit enforcement and validate_key rate check
+- Access control (unauthorized usage/update rejection)
+- Max keys limit enforcement
+- Rent reclamation on close
+- All three window durations
+- Invalid permission bit rejection
+- Full lifecycle integration test (create → use → update → revoke → close)
 
 ### Deploy to Devnet
 ```bash
@@ -214,8 +229,6 @@ anchor deploy --provider.cluster devnet
 ```
 
 ## Complete Lifecycle Example
-
-Here's how the full API key management lifecycle works, from service creation through key revocation:
 
 ```
 ┌─ Service Owner ──────────────────────────────────────────────────┐
@@ -228,41 +241,49 @@ Here's how the full API key management lifecycle works, from service creation th
 │                                                                  │
 │  3. [API request comes in with sk_abc... in Authorization header]│
 │     → Backend hashes key, calls validate_key (free RPC read)    │
+│     → Calls check_permission(WRITE) for endpoint authorization  │
 │     → If valid: calls record_usage (tx, ~$0.000005)             │
-│     → Checks permissions bitmask for endpoint authorization     │
 │                                                                  │
-│  4. update_key(perms=READ|WRITE|DELETE, rate=2000)              │
-│     → Modifies key on-chain, immediately effective              │
+│  4. update_service(rate=2000) → Change defaults for new keys    │
+│  5. update_key(perms=READ|WRITE|DELETE) → Upgrade existing key  │
+│  6. revoke_key() → Soft-disable, future usage rejected          │
+│  7. close_key()  → Delete account, rent SOL returned            │
 │                                                                  │
-│  5. revoke_key() → Soft-disables, future usage rejected         │
-│  6. close_key()  → Deletes account, rent SOL returned           │
+│  Key insight: validate_key and check_permission are free RPC    │
+│  reads. Only record_usage costs ~$0.000005 per call.            │
 └──────────────────────────────────────────────────────────────────┘
 ```
-
-**Key insight**: `validate_key` is a free RPC read (no transaction needed). Only `record_usage` requires a transaction. This means validation at scale costs nothing — you only pay the ~$0.000005 fee when you want to record usage on-chain.
 
 ## CLI Client
 
 A TypeScript CLI client is included for interacting with the deployed program:
 
 ```bash
-cd client
-npm install
+cd client && npm install
 
 # Create a service
 npx ts-node src/cli.ts create-service --name "My API" --max-keys 100 --rate-limit 1000
 
-# Generate and register an API key
-npx ts-node src/cli.ts create-key --label "Production Key" --permissions 3
+# View service info
+npx ts-node src/cli.ts service-info
 
-# Validate a key
+# Update service config
+npx ts-node src/cli.ts update-service --name "My API v2" --rate-limit 2000
+
+# Generate and register an API key
+npx ts-node src/cli.ts create-key --label "Production" --permissions 3
+
+# Validate a key (shows status, usage, permissions)
 npx ts-node src/cli.ts validate-key --key <API_KEY>
+
+# Check if key has a specific permission
+npx ts-node src/cli.ts check-permission --key <API_KEY> --permission 4
 
 # Record usage
 npx ts-node src/cli.ts record-usage --key <API_KEY>
 
-# Update key permissions
-npx ts-node src/cli.ts update-key --key <API_KEY> --permissions 7
+# Update key
+npx ts-node src/cli.ts update-key --key <API_KEY> --permissions 7 --rate-limit 5000
 
 # Revoke a key
 npx ts-node src/cli.ts revoke-key --key <API_KEY>
@@ -274,7 +295,7 @@ npx ts-node src/cli.ts close-key --key <API_KEY>
 npx ts-node src/cli.ts list-keys
 ```
 
-All commands support `--cluster <localnet|devnet|mainnet>` and `--keypair <path>` options.
+All commands support `--cluster <localnet|devnet|mainnet>` and `--keypair <path>`.
 
 ## Devnet Deployment
 
@@ -284,10 +305,9 @@ All commands support `--cluster <localnet|devnet|mainnet>` and `--keypair <path>
 
 ## Events & Indexing
 
-The program emits Anchor events for all state changes, enabling off-chain indexing:
+The program emits Anchor events for all state changes:
 
 ```typescript
-// Subscribe to events
 program.addEventListener("ServiceCreated", (event) => {
   console.log(`New service: ${event.name} by ${event.owner}`);
 });
@@ -295,9 +315,13 @@ program.addEventListener("ServiceCreated", (event) => {
 program.addEventListener("UsageRecorded", (event) => {
   console.log(`Key used: ${event.windowUsage}/${event.totalUsage}`);
 });
+
+program.addEventListener("PermissionChecked", (event) => {
+  console.log(`Permission ${event.required} → ${event.granted ? "granted" : "denied"}`);
+});
 ```
 
-Events can be indexed by services like Helius, Shyft, or custom geyser plugins for building dashboards, analytics, and alerting on top of the on-chain data.
+Events can be indexed by Helius, Shyft, or geyser plugins for dashboards, analytics, and alerting.
 
 ## License
 
