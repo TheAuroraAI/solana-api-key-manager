@@ -218,7 +218,7 @@ program
     const [apiKeyPDA] = findApiKeyPDA(servicePDA, keyHash);
 
     try {
-      const apiKeyAccount = await prog.account.apiKey.fetch(apiKeyPDA);
+      const apiKeyAccount = await (prog.account as any).apiKey.fetch(apiKeyPDA);
 
       const now = Math.floor(Date.now() / 1000);
       const windowElapsed = now - (apiKeyAccount.windowStart as anchor.BN).toNumber();
@@ -403,7 +403,7 @@ program
     const [servicePDA] = findServicePDA(wallet.publicKey);
 
     try {
-      const service = await prog.account.serviceConfig.fetch(servicePDA);
+      const service = await (prog.account as any).serviceConfig.fetch(servicePDA);
       console.log(chalk.blue(`Service: ${service.name}`));
       console.log(
         `  Active keys: ${service.activeKeys}/${service.maxKeys}`
@@ -415,7 +415,7 @@ program
     }
 
     // Fetch all ApiKey accounts for this service
-    const accounts = await prog.account.apiKey.all([
+    const accounts = await (prog.account as any).apiKey.all([
       {
         memcmp: {
           offset: 8, // discriminator
