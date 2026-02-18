@@ -198,10 +198,13 @@ Key state lives on-chain in PDAs:
 anchor build
 ```
 
-### Test (local validator)
+### Test (28 test cases, local validator)
 ```bash
-anchor test
+npm install
+anchor test --validator legacy
 ```
+
+Tests cover: service initialization, key CRUD operations, permission bitmask validation, rate limit enforcement, expiry handling, access control (unauthorized usage recording), max keys limit, rent reclamation, and all three window durations.
 
 ### Deploy to Devnet
 ```bash

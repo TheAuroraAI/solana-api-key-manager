@@ -17,6 +17,22 @@ const PROGRAM_ID = new PublicKey(
   "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"
 );
 
+function formatPermissions(mask: number): string {
+  const perms: string[] = [];
+  if (mask & 1) perms.push("READ");
+  if (mask & 2) perms.push("WRITE");
+  if (mask & 4) perms.push("DELETE");
+  if (mask & 8) perms.push("ADMIN");
+  return perms.length > 0 ? perms.join("|") : "NONE";
+}
+
+function formatWindow(seconds: number): string {
+  if (seconds === 60) return "per minute";
+  if (seconds === 3600) return "per hour";
+  if (seconds === 86400) return "per day";
+  return `per ${seconds}s`;
+}
+
 const IDL_PATH = path.join(__dirname, "../../target/idl/api_key_manager.json");
 
 function getConnection(cluster: string): Connection {
@@ -231,9 +247,9 @@ program
       console.log(
         `  Status: ${apiKeyAccount.revoked ? chalk.red("REVOKED") : chalk.green("ACTIVE")}`
       );
-      console.log(`  Permissions: ${apiKeyAccount.permissions}`);
+      console.log(`  Permissions: ${formatPermissions(apiKeyAccount.permissions)} (${apiKeyAccount.permissions})`);
       console.log(
-        `  Rate Limit: ${currentUsage}/${apiKeyAccount.rateLimit} (window: ${windowSize}s)`
+        `  Rate Limit: ${currentUsage}/${apiKeyAccount.rateLimit} ${formatWindow(windowSize)}`
       );
       console.log(`  Total Usage: ${(apiKeyAccount.totalUsage as anchor.BN).toString()}`);
       console.log(
@@ -433,13 +449,19 @@ program
       const status = account.revoked
         ? chalk.red("REVOKED")
         : chalk.green("ACTIVE");
+      const windowSize = (account.rateLimitWindow as anchor.BN).toNumber();
       console.log(
         `\n  ${status} ${account.label} (${publicKey.toBase58().slice(0, 8)}...)`
       );
-      console.log(`    Permissions: ${account.permissions}`);
+      console.log(`    Permissions: ${formatPermissions(account.permissions)}`);
       console.log(
-        `    Usage: ${account.windowUsage}/${account.rateLimit} (window), ${(account.totalUsage as anchor.BN).toString()} (total)`
+        `    Rate Limit: ${account.windowUsage}/${account.rateLimit} ${formatWindow(windowSize)}`
       );
+      console.log(`    Total Usage: ${(account.totalUsage as anchor.BN).toString()}`);
+      const expiresAt = (account.expiresAt as anchor.BN).toNumber();
+      if (expiresAt > 0) {
+        console.log(`    Expires: ${new Date(expiresAt * 1000).toISOString()}`);
+      }
     }
   });
 
