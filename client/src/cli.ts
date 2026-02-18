@@ -617,6 +617,77 @@ program
   });
 
 // ============================================================================
+// export (JSON output for integration)
+// ============================================================================
+program
+  .command("export")
+  .description("Export service and key data as JSON (for dashboards, CI/CD, monitoring)")
+  .option("--owner <pubkey>", "Service owner public key (defaults to your wallet)")
+  .option("--pretty", "Pretty-print JSON output", false)
+  .action(async (opts) => {
+    const parentOpts = program.opts();
+    const connection = getConnection(parentOpts.cluster);
+    const wallet = loadKeypair(parentOpts.keypair);
+    const prog = await getProgram(connection, wallet);
+
+    const ownerPubkey = opts.owner ? new PublicKey(opts.owner) : wallet.publicKey;
+    const [servicePDA] = findServicePDA(ownerPubkey);
+
+    try {
+      const service = await (prog.account as any).serviceConfig.fetch(servicePDA);
+
+      const accounts = await (prog.account as any).apiKey.all([
+        { memcmp: { offset: 8, bytes: servicePDA.toBase58() } },
+      ]);
+
+      const now = Math.floor(Date.now() / 1000);
+
+      const output = {
+        service: {
+          address: servicePDA.toBase58(),
+          owner: service.owner.toBase58(),
+          name: service.name,
+          maxKeys: service.maxKeys,
+          activeKeys: service.activeKeys,
+          totalKeysCreated: service.totalKeysCreated,
+          defaultRateLimit: service.defaultRateLimit,
+          rateLimitWindow: (service.rateLimitWindow as anchor.BN).toNumber(),
+          createdAt: (service.createdAt as anchor.BN).toNumber(),
+        },
+        keys: accounts.map(({ account, publicKey }: any) => {
+          const windowSize = (account.rateLimitWindow as anchor.BN).toNumber();
+          const windowElapsed = now - (account.windowStart as anchor.BN).toNumber();
+          const currentUsage = windowElapsed >= windowSize ? 0 : account.windowUsage;
+
+          return {
+            address: publicKey.toBase58(),
+            label: account.label,
+            permissions: account.permissions,
+            permissionNames: formatPermissions(account.permissions),
+            rateLimit: account.rateLimit,
+            currentWindowUsage: currentUsage,
+            remainingUsage: account.rateLimit - currentUsage,
+            totalUsage: (account.totalUsage as anchor.BN).toNumber(),
+            revoked: account.revoked,
+            expiresAt: (account.expiresAt as anchor.BN).toNumber(),
+            expired: (account.expiresAt as anchor.BN).toNumber() > 0 && now >= (account.expiresAt as anchor.BN).toNumber(),
+            createdAt: (account.createdAt as anchor.BN).toNumber(),
+            lastUsedAt: (account.lastUsedAt as anchor.BN).toNumber(),
+          };
+        }),
+        exportedAt: now,
+        cluster: parentOpts.cluster,
+      };
+
+      const indent = opts.pretty ? 2 : undefined;
+      console.log(JSON.stringify(output, null, indent));
+    } catch {
+      console.error(JSON.stringify({ error: "No service found for this wallet" }));
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
 // Parse
 // ============================================================================
 

@@ -433,7 +433,7 @@ The SDK exports:
 
 ## CLI Client
 
-An interactive CLI for managing services and keys:
+A 12-command CLI for managing services and keys:
 
 ```bash
 cd client && npm install
@@ -452,11 +452,39 @@ npx ts-node src/cli.ts update-key --key <API_KEY> --permissions 7 --rate-limit 5
 npx ts-node src/cli.ts revoke-key --key <API_KEY>
 npx ts-node src/cli.ts close-key --key <API_KEY>
 npx ts-node src/cli.ts list-keys
+
+# Data export
+npx ts-node src/cli.ts export --pretty
 ```
 
 All commands support `--cluster <localnet|devnet|mainnet>` and `--keypair <path>`.
 
-Permission bitmask values: `1`=READ, `2`=WRITE, `4`=DELETE, `8`=ADMIN. Combine with addition: `3`=READ+WRITE, `7`=READ+WRITE+DELETE, `15`=ALL.
+### Data Export (JSON)
+
+Export all service and key data as JSON for dashboards, monitoring, or CI/CD:
+
+```bash
+# Compact JSON (pipe to jq, store in file, send to monitoring)
+npx ts-node src/cli.ts export > service-data.json
+
+# Pretty-printed for inspection
+npx ts-node src/cli.ts export --pretty
+
+# Pipe to jq to get active key count
+npx ts-node src/cli.ts export | jq '.keys | map(select(.revoked == false)) | length'
+```
+
+### Permission Reference
+
+| Value | Name | Description |
+|-------|------|-------------|
+| `1` | READ | Can read resources |
+| `2` | WRITE | Can create/update resources |
+| `4` | DELETE | Can delete resources |
+| `8` | ADMIN | Can manage other keys |
+| `3` | READ+WRITE | Common for standard API access |
+| `7` | READ+WRITE+DELETE | Full data access |
+| `15` | ALL | Full admin access |
 
 ## Migration Guide: Web2 → On-Chain
 
@@ -519,11 +547,11 @@ Events can be indexed by Helius, Shyft, or geyser plugins for dashboards, analyt
 ## Repository Structure
 
 ```
-├── programs/api-key-manager/src/lib.rs   # Solana program (695 lines)
-├── tests/api-key-manager.ts              # 45 test cases
+├── programs/api-key-manager/src/lib.rs   # Solana program (~710 lines)
+├── tests/api-key-manager.ts              # 49 test cases
 ├── client/
 │   └── src/
-│       ├── cli.ts                        # 11-command CLI client
+│       ├── cli.ts                        # 12-command CLI client
 │       └── sdk.ts                        # TypeScript SDK (926 lines)
 ├── scripts/
 │   └── deploy-devnet.sh                  # Automated deployment + smoke test
