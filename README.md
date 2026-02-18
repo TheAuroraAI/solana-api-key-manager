@@ -213,6 +213,34 @@ solana airdrop 2
 anchor deploy --provider.cluster devnet
 ```
 
+## Complete Lifecycle Example
+
+Here's how the full API key management lifecycle works, from service creation through key revocation:
+
+```
+┌─ Service Owner ──────────────────────────────────────────────────┐
+│                                                                  │
+│  1. initialize_service("My API", max=100, rate=1000/hr)         │
+│     → Creates ServiceConfig PDA on-chain                        │
+│                                                                  │
+│  2. create_key(hash("sk_abc..."), "Prod Key", READ|WRITE)       │
+│     → Creates ApiKey PDA, returns raw key to user once          │
+│                                                                  │
+│  3. [API request comes in with sk_abc... in Authorization header]│
+│     → Backend hashes key, calls validate_key (free RPC read)    │
+│     → If valid: calls record_usage (tx, ~$0.000005)             │
+│     → Checks permissions bitmask for endpoint authorization     │
+│                                                                  │
+│  4. update_key(perms=READ|WRITE|DELETE, rate=2000)              │
+│     → Modifies key on-chain, immediately effective              │
+│                                                                  │
+│  5. revoke_key() → Soft-disables, future usage rejected         │
+│  6. close_key()  → Deletes account, rent SOL returned           │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Key insight**: `validate_key` is a free RPC read (no transaction needed). Only `record_usage` requires a transaction. This means validation at scale costs nothing — you only pay the ~$0.000005 fee when you want to record usage on-chain.
+
 ## CLI Client
 
 A TypeScript CLI client is included for interacting with the deployed program:
@@ -241,7 +269,12 @@ npx ts-node src/cli.ts revoke-key --key <API_KEY>
 
 # Close a key (reclaim rent)
 npx ts-node src/cli.ts close-key --key <API_KEY>
+
+# List all keys for your service
+npx ts-node src/cli.ts list-keys
 ```
+
+All commands support `--cluster <localnet|devnet|mainnet>` and `--keypair <path>` options.
 
 ## Devnet Deployment
 
