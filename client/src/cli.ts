@@ -14,7 +14,7 @@ import chalk from "chalk";
 
 // Program ID — update after deployment
 const PROGRAM_ID = new PublicKey(
-  "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+  "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"
 );
 
 const IDL_PATH = path.join(__dirname, "../../target/idl/api_key_manager.json");
@@ -253,17 +253,15 @@ program
 // ============================================================================
 program
   .command("record-usage")
-  .description("Record a usage event for an API key")
+  .description("Record a usage event for an API key (service owner only)")
   .requiredOption("--key <api-key>", "The API key")
-  .requiredOption("--service-owner <pubkey>", "Service owner public key")
   .action(async (opts) => {
     const parentOpts = program.opts();
     const connection = getConnection(parentOpts.cluster);
     const wallet = loadKeypair(parentOpts.keypair);
     const prog = await getProgram(connection, wallet);
 
-    const ownerPubkey = new PublicKey(opts.serviceOwner);
-    const [servicePDA] = findServicePDA(ownerPubkey);
+    const [servicePDA] = findServicePDA(wallet.publicKey);
     const keyHash = hashApiKey(opts.key);
     const [apiKeyPDA] = findApiKeyPDA(servicePDA, keyHash);
 
@@ -272,8 +270,7 @@ program
       .accounts({
         serviceConfig: servicePDA,
         apiKey: apiKeyPDA,
-        caller: wallet.publicKey,
-        service: servicePDA,
+        owner: wallet.publicKey,
       })
       .signers([wallet])
       .rpc();
@@ -314,6 +311,81 @@ program
 
     console.log(chalk.green("Key revoked!"));
     console.log(`  Transaction: ${tx}`);
+  });
+
+// ============================================================================
+// update-key
+// ============================================================================
+program
+  .command("update-key")
+  .description("Update an API key's permissions or rate limit (service owner only)")
+  .requiredOption("--key <api-key>", "The API key to update")
+  .option("-p, --permissions <mask>", "New permission bitmask")
+  .option("-r, --rate-limit <number>", "New rate limit")
+  .option("-e, --expires <timestamp>", "New expiry timestamp")
+  .action(async (opts) => {
+    const parentOpts = program.opts();
+    const connection = getConnection(parentOpts.cluster);
+    const wallet = loadKeypair(parentOpts.keypair);
+    const prog = await getProgram(connection, wallet);
+
+    const [servicePDA] = findServicePDA(wallet.publicKey);
+    const keyHash = hashApiKey(opts.key);
+    const [apiKeyPDA] = findApiKeyPDA(servicePDA, keyHash);
+
+    const permissions = opts.permissions ? parseInt(opts.permissions) : null;
+    const rateLimit = opts.rateLimit ? parseInt(opts.rateLimit) : null;
+    const expiresAt = opts.expires ? new anchor.BN(parseInt(opts.expires)) : null;
+
+    const tx = await prog.methods
+      .updateKey(permissions, rateLimit, expiresAt)
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDA,
+        owner: wallet.publicKey,
+      })
+      .signers([wallet])
+      .rpc();
+
+    console.log(chalk.green("Key updated!"));
+    console.log(`  Transaction: ${tx}`);
+    console.log(
+      `  Explorer: https://explorer.solana.com/tx/${tx}?cluster=${parentOpts.cluster}`
+    );
+  });
+
+// ============================================================================
+// close-key
+// ============================================================================
+program
+  .command("close-key")
+  .description("Close an API key account and reclaim rent (service owner only)")
+  .requiredOption("--key <api-key>", "The API key to close")
+  .action(async (opts) => {
+    const parentOpts = program.opts();
+    const connection = getConnection(parentOpts.cluster);
+    const wallet = loadKeypair(parentOpts.keypair);
+    const prog = await getProgram(connection, wallet);
+
+    const [servicePDA] = findServicePDA(wallet.publicKey);
+    const keyHash = hashApiKey(opts.key);
+    const [apiKeyPDA] = findApiKeyPDA(servicePDA, keyHash);
+
+    const tx = await prog.methods
+      .closeKey()
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDA,
+        owner: wallet.publicKey,
+      })
+      .signers([wallet])
+      .rpc();
+
+    console.log(chalk.green("Key closed! Rent reclaimed."));
+    console.log(`  Transaction: ${tx}`);
+    console.log(
+      `  Explorer: https://explorer.solana.com/tx/${tx}?cluster=${parentOpts.cluster}`
+    );
   });
 
 // ============================================================================

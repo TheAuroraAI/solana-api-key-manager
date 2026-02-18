@@ -88,7 +88,6 @@ pub mod api_key_manager {
         api_key.permissions = permissions_mask;
         api_key.rate_limit = rate_limit.unwrap_or(service.default_rate_limit);
         api_key.rate_limit_window = service.rate_limit_window;
-        api_key.usage_count = 0;
         api_key.window_start = clock.unix_timestamp;
         api_key.window_usage = 0;
         api_key.total_usage = 0;
@@ -97,8 +96,14 @@ pub mod api_key_manager {
         api_key.revoked = false;
         api_key.bump = ctx.bumps.api_key;
 
-        service.total_keys_created += 1;
-        service.active_keys += 1;
+        service.total_keys_created = service
+            .total_keys_created
+            .checked_add(1)
+            .ok_or(ApiKeyError::Overflow)?;
+        service.active_keys = service
+            .active_keys
+            .checked_add(1)
+            .ok_or(ApiKeyError::Overflow)?;
 
         emit!(KeyCreated {
             service: service.key(),
@@ -112,6 +117,7 @@ pub mod api_key_manager {
 
     /// Record a usage event for an API key. Validates the key is active and within rate limits.
     /// This is the core "middleware" equivalent — call this when an API request is made.
+    /// Only the service owner can record usage (prevents griefing by unauthorized callers).
     pub fn record_usage(ctx: Context<RecordUsage>, key_hash: [u8; 32]) -> Result<()> {
         let api_key = &mut ctx.accounts.api_key;
 
@@ -128,7 +134,9 @@ pub mod api_key_manager {
         }
 
         // Check rate limit window — reset if window has passed
-        let window_elapsed = clock.unix_timestamp - api_key.window_start;
+        let window_elapsed = clock
+            .unix_timestamp
+            .saturating_sub(api_key.window_start);
         if window_elapsed >= api_key.rate_limit_window {
             // New window
             api_key.window_start = clock.unix_timestamp;
@@ -141,9 +149,15 @@ pub mod api_key_manager {
             ApiKeyError::RateLimitExceeded
         );
 
-        // Record usage
-        api_key.window_usage += 1;
-        api_key.total_usage += 1;
+        // Record usage with checked arithmetic
+        api_key.window_usage = api_key
+            .window_usage
+            .checked_add(1)
+            .ok_or(ApiKeyError::Overflow)?;
+        api_key.total_usage = api_key
+            .total_usage
+            .checked_add(1)
+            .ok_or(ApiKeyError::Overflow)?;
 
         emit!(UsageRecorded {
             service: api_key.service,
@@ -171,7 +185,7 @@ pub mod api_key_manager {
         }
 
         // Check current window usage
-        let window_elapsed = clock.unix_timestamp - api_key.window_start;
+        let window_elapsed = clock.unix_timestamp.saturating_sub(api_key.window_start);
         let current_usage = if window_elapsed >= api_key.rate_limit_window {
             0 // Would be reset on next record_usage
         } else {
@@ -318,8 +332,6 @@ pub struct ApiKey {
     pub revoked: bool,
     /// PDA bump seed
     pub bump: u8,
-    /// Reserved for future use (padding, unused)
-    pub usage_count: u32,
 }
 
 // ============================================================================
@@ -368,21 +380,19 @@ pub struct CreateKey<'info> {
 #[instruction(key_hash: [u8; 32])]
 pub struct RecordUsage<'info> {
     #[account(
-        seeds = [b"service", service_config.owner.as_ref()],
-        bump = service_config.bump
+        seeds = [b"service", owner.key().as_ref()],
+        bump = service_config.bump,
+        has_one = owner
     )]
     pub service_config: Account<'info, ServiceConfig>,
     #[account(
         mut,
         seeds = [b"apikey", service_config.key().as_ref(), &key_hash],
         bump = api_key.bump,
-        has_one = service @ ApiKeyError::InvalidService,
     )]
     pub api_key: Account<'info, ApiKey>,
-    /// Anyone can record usage (the API gateway calls this)
-    pub caller: Signer<'info>,
-    /// CHECK: This is the service pubkey used for PDA derivation validation
-    pub service: AccountInfo<'info>,
+    /// Only the service owner can record usage (prevents griefing)
+    pub owner: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -535,4 +545,6 @@ pub enum ApiKeyError {
     AlreadyRevoked,
     #[msg("Invalid service account")]
     InvalidService,
+    #[msg("Arithmetic overflow")]
+    Overflow,
 }

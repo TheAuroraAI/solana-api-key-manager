@@ -128,8 +128,7 @@ describe("api-key-manager", () => {
       .accounts({
         serviceConfig: servicePDA,
         apiKey: apiKeyPDA,
-        caller: owner.publicKey,
-        service: servicePDA,
+        owner: owner.publicKey,
       })
       .rpc();
 

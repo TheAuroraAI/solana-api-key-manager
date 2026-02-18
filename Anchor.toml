@@ -5,7 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-api_key_manager = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+api_key_manager = "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"
 
 [programs.localnet]
 api_key_manager = "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"
