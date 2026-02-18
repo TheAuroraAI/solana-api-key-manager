@@ -254,6 +254,45 @@ anchor deploy --provider.cluster devnet
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+## TypeScript SDK
+
+A typed SDK is provided for programmatic integration:
+
+```typescript
+import { ApiKeyManagerSDK, Permission, RateLimitWindow } from "./client/src/sdk";
+
+// Initialize
+const sdk = new ApiKeyManagerSDK(connection, wallet);
+
+// Create a service
+await sdk.initializeService({
+  name: "My API",
+  maxKeys: 100,
+  defaultRateLimit: 1000,
+  rateLimitWindow: RateLimitWindow.ONE_HOUR,
+});
+
+// Create an API key
+const { rawKey, apiKeyAddress } = await sdk.createKey({
+  label: "Production",
+  permissionsMask: Permission.READ | Permission.WRITE,
+  rateLimit: 500,
+});
+
+// Validate and check permissions (anyone can do this)
+await sdk.validateKey(rawKey);
+await sdk.checkPermission(rawKey, Permission.WRITE);
+
+// Record usage (owner only)
+await sdk.recordUsage(rawKey);
+
+// Fetch account data
+const service = await sdk.fetchServiceConfig();
+const allKeys = await sdk.fetchAllApiKeys();
+```
+
+The SDK exports typed interfaces for all on-chain accounts, permission constants, PDA derivation helpers, and full JSDoc documentation.
+
 ## CLI Client
 
 A TypeScript CLI client is included for interacting with the deployed program:
