@@ -1,3 +1,32 @@
+//! # On-Chain API Key Manager
+//!
+//! A Solana program that implements API key management — the same pattern used by
+//! Stripe, OpenAI, AWS, and every SaaS platform — entirely on-chain.
+//!
+//! ## Architecture
+//!
+//! - **ServiceConfig PDA** `[b"service", owner]`: One per wallet. Stores service name,
+//!   key limits, rate limit defaults. The service owner manages all keys.
+//!
+//! - **ApiKey PDA** `[b"apikey", service, key_hash]`: One per API key. Stores the
+//!   SHA-256 hash (never the raw key), permissions bitmask, rate limit counters,
+//!   expiry timestamp, and revocation status.
+//!
+//! ## Trust Model
+//!
+//! Unlike Web2 where the operator controls the database and can silently modify keys,
+//! all state here is publicly verifiable. Users can independently check their key's
+//! configuration, permissions, usage, and rate limit status on-chain.
+//!
+//! ## Key Design Decisions
+//!
+//! 1. Raw API keys never touch the chain — only SHA-256 hashes are stored
+//! 2. Permission bitmask (`u16`) for compact, composable access control
+//! 3. Fixed-window rate limiting (60s/3600s/86400s) — no micro-windows
+//! 4. Owner-gated `record_usage` prevents usage griefing attacks
+//! 5. One service per wallet (PDA seeded by owner pubkey)
+//! 6. `validate_key` and `check_permission` are free via RPC simulation
+
 use anchor_lang::prelude::*;
 
 declare_id!("v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju");
@@ -375,6 +404,7 @@ pub mod api_key_manager {
 
         Ok(())
     }
+
 }
 
 // ============================================================================
@@ -581,6 +611,7 @@ pub struct CloseKey<'info> {
     pub owner: Signer<'info>,
 }
 
+
 // ============================================================================
 // Events — emitted for off-chain indexing (Helius, Shyft, geyser plugins)
 // ============================================================================
@@ -658,6 +689,7 @@ pub struct KeyClosed {
     pub key_hash: [u8; 32],
     pub total_usage: u64,
 }
+
 
 // ============================================================================
 // Errors

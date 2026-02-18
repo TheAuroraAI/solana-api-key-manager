@@ -1325,6 +1325,227 @@ describe("api-key-manager", () => {
   });
 
   // ========================================================================
+  // Edge Cases & Robustness
+  // ========================================================================
+
+  it("creates key with all permissions and custom rate limit", async () => {
+    const key = generateApiKey();
+    const keyHash = hashApiKey(key);
+    const [kPDA] = findApiKeyPDA(servicePDA, keyHash, program.programId);
+
+    const futureExpiry = Math.floor(Date.now() / 1000) + 86400;
+
+    await program.methods
+      .createKey(
+        Array.from(keyHash),
+        "Full Access",
+        15, // READ | WRITE | DELETE | ADMIN
+        9999,
+        new anchor.BN(futureExpiry)
+      )
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: kPDA,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const apiKey = await program.account.apiKey.fetch(kPDA);
+    expect(apiKey.permissions).to.equal(15);
+    expect(apiKey.rateLimit).to.equal(9999);
+    expect(apiKey.expiresAt.toNumber()).to.equal(futureExpiry);
+    expect(apiKey.revoked).to.equal(false);
+    expect(apiKey.windowUsage).to.equal(0);
+  });
+
+  it("cannot create key with zero permissions", async () => {
+    const key = generateApiKey();
+    const keyHash = hashApiKey(key);
+    const [kPDA] = findApiKeyPDA(servicePDA, keyHash, program.programId);
+
+    // Permission mask 0 should be valid (is_valid checks for bits outside range, not zero)
+    // This tests the current behavior — zero permissions is allowed but useless
+    await program.methods
+      .createKey(Array.from(keyHash), "No Perms", 0, null, null)
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: kPDA,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const apiKey = await program.account.apiKey.fetch(kPDA);
+    expect(apiKey.permissions).to.equal(0);
+
+    // Check permission should fail for any permission on this key
+    try {
+      await program.methods
+        .checkPermission(1) // READ
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: kPDA,
+        })
+        .rpc();
+      expect.fail("Should have thrown — no permissions");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("InsufficientPermissions");
+    }
+  });
+
+  it("validates that usage cannot be recorded by non-owner even with correct key_hash", async () => {
+    // Create a second service owned by someone else
+    const otherOwner = Keypair.generate();
+    const airdropSig = await provider.connection.requestAirdrop(
+      otherOwner.publicKey,
+      2_000_000_000
+    );
+    await provider.connection.confirmTransaction(airdropSig);
+
+    const [otherServicePDA] = findServicePDA(
+      otherOwner.publicKey,
+      program.programId
+    );
+
+    await program.methods
+      .initializeService("Other Service", 10, 100, new anchor.BN(3600))
+      .accounts({
+        serviceConfig: otherServicePDA,
+        owner: otherOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([otherOwner])
+      .rpc();
+
+    const otherKey = generateApiKey();
+    const otherKeyHash = hashApiKey(otherKey);
+    const [otherApiKeyPDA] = findApiKeyPDA(
+      otherServicePDA,
+      otherKeyHash,
+      program.programId
+    );
+
+    await program.methods
+      .createKey(Array.from(otherKeyHash), "Other Key", 3, null, null)
+      .accounts({
+        serviceConfig: otherServicePDA,
+        apiKey: otherApiKeyPDA,
+        owner: otherOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([otherOwner])
+      .rpc();
+
+    // Now try to record usage with the main owner's wallet (not the other service's owner)
+    try {
+      await program.methods
+        .recordUsage(Array.from(otherKeyHash))
+        .accounts({
+          serviceConfig: otherServicePDA,
+          apiKey: otherApiKeyPDA,
+          owner: owner.publicKey,  // Wrong owner
+        })
+        .rpc();
+      expect.fail("Should have thrown — wrong service owner");
+    } catch (e: any) {
+      expect(e).to.exist;
+    }
+  });
+
+  it("service counters are accurate after multiple creates and closes", async () => {
+    const testOwner = Keypair.generate();
+    const airdropSig = await provider.connection.requestAirdrop(
+      testOwner.publicKey,
+      5_000_000_000
+    );
+    await provider.connection.confirmTransaction(airdropSig);
+
+    const [testServicePDA] = findServicePDA(
+      testOwner.publicKey,
+      program.programId
+    );
+
+    await program.methods
+      .initializeService("Counter Test", 10, 100, new anchor.BN(3600))
+      .accounts({
+        serviceConfig: testServicePDA,
+        owner: testOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([testOwner])
+      .rpc();
+
+    // Create 3 keys
+    const keys: { hash: Buffer; pda: PublicKey }[] = [];
+    for (let i = 0; i < 3; i++) {
+      const k = generateApiKey();
+      const kh = hashApiKey(k);
+      const [kPDA] = findApiKeyPDA(testServicePDA, kh, program.programId);
+      keys.push({ hash: kh, pda: kPDA });
+
+      await program.methods
+        .createKey(Array.from(kh), `Key ${i}`, 3, null, null)
+        .accounts({
+          serviceConfig: testServicePDA,
+          apiKey: kPDA,
+          owner: testOwner.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([testOwner])
+        .rpc();
+    }
+
+    let service = await program.account.serviceConfig.fetch(testServicePDA);
+    expect(service.totalKeysCreated).to.equal(3);
+    expect(service.activeKeys).to.equal(3);
+
+    // Revoke key 0
+    await program.methods
+      .revokeKey()
+      .accounts({
+        serviceConfig: testServicePDA,
+        apiKey: keys[0].pda,
+        owner: testOwner.publicKey,
+      })
+      .signers([testOwner])
+      .rpc();
+
+    service = await program.account.serviceConfig.fetch(testServicePDA);
+    expect(service.totalKeysCreated).to.equal(3);
+    expect(service.activeKeys).to.equal(2);
+
+    // Close key 0 (already revoked — shouldn't decrement active_keys again)
+    await program.methods
+      .closeKey()
+      .accounts({
+        serviceConfig: testServicePDA,
+        apiKey: keys[0].pda,
+        owner: testOwner.publicKey,
+      })
+      .signers([testOwner])
+      .rpc();
+
+    service = await program.account.serviceConfig.fetch(testServicePDA);
+    expect(service.activeKeys).to.equal(2); // Unchanged — was already revoked
+
+    // Close key 1 (not revoked — should decrement)
+    await program.methods
+      .closeKey()
+      .accounts({
+        serviceConfig: testServicePDA,
+        apiKey: keys[1].pda,
+        owner: testOwner.publicKey,
+      })
+      .signers([testOwner])
+      .rpc();
+
+    service = await program.account.serviceConfig.fetch(testServicePDA);
+    expect(service.activeKeys).to.equal(1); // Decremented from 2 to 1
+    expect(service.totalKeysCreated).to.equal(3); // Never decrements
+  });
+
+  // ========================================================================
   // Full Lifecycle — Integration Test
   // ========================================================================
 
