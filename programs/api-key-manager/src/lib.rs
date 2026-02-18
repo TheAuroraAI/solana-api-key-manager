@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju");
 
 /// Permission bits for API keys
 pub mod permissions {
