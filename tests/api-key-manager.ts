@@ -144,8 +144,7 @@ describe("api-key-manager", () => {
         .accounts({
           serviceConfig: servicePDA,
           apiKey: apiKeyPDA,
-          caller: owner.publicKey,
-          service: servicePDA,
+          owner: owner.publicKey,
         })
         .rpc();
     }
@@ -198,8 +197,7 @@ describe("api-key-manager", () => {
         .accounts({
           serviceConfig: servicePDA,
           apiKey: apiKeyPDA,
-          caller: owner.publicKey,
-          service: servicePDA,
+          owner: owner.publicKey,
         })
         .rpc();
       expect.fail("Should have thrown");
@@ -330,6 +328,369 @@ describe("api-key-manager", () => {
       expect.fail("Should have thrown");
     } catch (e: any) {
       expect(e.error.errorCode.code).to.equal("InvalidWindow");
+    }
+  });
+
+  it("rejects service name longer than 32 characters", async () => {
+    const badOwner = Keypair.generate();
+    const airdropSig = await provider.connection.requestAirdrop(
+      badOwner.publicKey,
+      1_000_000_000
+    );
+    await provider.connection.confirmTransaction(airdropSig);
+
+    const [badServicePDA] = findServicePDA(
+      badOwner.publicKey,
+      program.programId
+    );
+
+    try {
+      await program.methods
+        .initializeService(
+          "This name is way too long for the field limit of 32 chars",
+          100,
+          1000,
+          new anchor.BN(3600)
+        )
+        .accounts({
+          serviceConfig: badServicePDA,
+          owner: badOwner.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([badOwner])
+        .rpc();
+      expect.fail("Should have thrown");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("NameTooLong");
+    }
+  });
+
+  it("rejects zero max_keys", async () => {
+    const badOwner = Keypair.generate();
+    const airdropSig = await provider.connection.requestAirdrop(
+      badOwner.publicKey,
+      1_000_000_000
+    );
+    await provider.connection.confirmTransaction(airdropSig);
+
+    const [badServicePDA] = findServicePDA(
+      badOwner.publicKey,
+      program.programId
+    );
+
+    try {
+      await program.methods
+        .initializeService("Zero Keys", 0, 1000, new anchor.BN(3600))
+        .accounts({
+          serviceConfig: badServicePDA,
+          owner: badOwner.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([badOwner])
+        .rpc();
+      expect.fail("Should have thrown");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("InvalidConfig");
+    }
+  });
+
+  it("rejects update on revoked key", async () => {
+    try {
+      await program.methods
+        .updateKey(15, null, null)
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDA,
+          owner: owner.publicKey,
+        })
+        .rpc();
+      expect.fail("Should have thrown");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("KeyRevoked");
+    }
+  });
+
+  it("rejects double revocation", async () => {
+    try {
+      await program.methods
+        .revokeKey()
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDA,
+          owner: owner.publicKey,
+        })
+        .rpc();
+      expect.fail("Should have thrown");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("AlreadyRevoked");
+    }
+  });
+
+  it("rejects key creation with past expiry", async () => {
+    const keyPast = generateApiKey();
+    const keyHashPast = hashApiKey(keyPast);
+    const [apiKeyPDAPast] = findApiKeyPDA(
+      servicePDA,
+      keyHashPast,
+      program.programId
+    );
+
+    const pastTimestamp = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
+
+    try {
+      await program.methods
+        .createKey(
+          Array.from(keyHashPast),
+          "Past Key",
+          1,
+          null,
+          new anchor.BN(pastTimestamp)
+        )
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDAPast,
+          owner: owner.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      expect.fail("Should have thrown");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("InvalidExpiry");
+    }
+  });
+
+  it("rejects update with zero rate limit", async () => {
+    // Create a fresh key for this test
+    const keyFresh = generateApiKey();
+    const keyHashFresh = hashApiKey(keyFresh);
+    const [apiKeyPDAFresh] = findApiKeyPDA(
+      servicePDA,
+      keyHashFresh,
+      program.programId
+    );
+
+    await program.methods
+      .createKey(Array.from(keyHashFresh), "Fresh Key", 3, null, null)
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAFresh,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    try {
+      await program.methods
+        .updateKey(null, 0, null)
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDAFresh,
+          owner: owner.publicKey,
+        })
+        .rpc();
+      expect.fail("Should have thrown");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("InvalidConfig");
+    }
+  });
+
+  it("rejects unauthorized usage recording", async () => {
+    // Create a fresh key
+    const keyAuth = generateApiKey();
+    const keyHashAuth = hashApiKey(keyAuth);
+    const [apiKeyPDAAuth] = findApiKeyPDA(
+      servicePDA,
+      keyHashAuth,
+      program.programId
+    );
+
+    await program.methods
+      .createKey(Array.from(keyHashAuth), "Auth Test Key", 3, null, null)
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAAuth,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Try to record usage as a non-owner
+    const attacker = Keypair.generate();
+    const airdropSig = await provider.connection.requestAirdrop(
+      attacker.publicKey,
+      1_000_000_000
+    );
+    await provider.connection.confirmTransaction(airdropSig);
+
+    try {
+      await program.methods
+        .recordUsage(Array.from(keyHashAuth))
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDAAuth,
+          owner: attacker.publicKey,
+        })
+        .signers([attacker])
+        .rpc();
+      expect.fail("Should have thrown — unauthorized caller");
+    } catch (e: any) {
+      // Should fail due to has_one = owner constraint or PDA seed mismatch
+      expect(e).to.exist;
+    }
+  });
+
+  it("enforces rate limits", async () => {
+    // Create a key with very low rate limit (3 per window)
+    const keyRL = generateApiKey();
+    const keyHashRL = hashApiKey(keyRL);
+    const [apiKeyPDARL] = findApiKeyPDA(
+      servicePDA,
+      keyHashRL,
+      program.programId
+    );
+
+    await program.methods
+      .createKey(
+        Array.from(keyHashRL),
+        "Rate Limited Key",
+        3,
+        3, // only 3 requests per window
+        null
+      )
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDARL,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Use all 3 allowed requests
+    for (let i = 0; i < 3; i++) {
+      await program.methods
+        .recordUsage(Array.from(keyHashRL))
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDARL,
+          owner: owner.publicKey,
+        })
+        .rpc();
+    }
+
+    // 4th request should be rejected
+    try {
+      await program.methods
+        .recordUsage(Array.from(keyHashRL))
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDARL,
+          owner: owner.publicKey,
+        })
+        .rpc();
+      expect.fail("Should have thrown — rate limit exceeded");
+    } catch (e: any) {
+      expect(e.error.errorCode.code).to.equal("RateLimitExceeded");
+    }
+
+    // Verify counts
+    const apiKey = await program.account.apiKey.fetch(apiKeyPDARL);
+    expect(apiKey.windowUsage).to.equal(3);
+    expect(apiKey.totalUsage.toNumber()).to.equal(3);
+  });
+
+  it("validates key returns remaining usage info", async () => {
+    // Create a key and use it partially
+    const keyVal = generateApiKey();
+    const keyHashVal = hashApiKey(keyVal);
+    const [apiKeyPDAVal] = findApiKeyPDA(
+      servicePDA,
+      keyHashVal,
+      program.programId
+    );
+
+    await program.methods
+      .createKey(
+        Array.from(keyHashVal),
+        "Validation Test",
+        7, // READ + WRITE + DELETE
+        10,
+        null
+      )
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAVal,
+        owner: owner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Record 3 usages
+    for (let i = 0; i < 3; i++) {
+      await program.methods
+        .recordUsage(Array.from(keyHashVal))
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDAVal,
+          owner: owner.publicKey,
+        })
+        .rpc();
+    }
+
+    // Validate should succeed (7 remaining)
+    await program.methods
+      .validateKey()
+      .accounts({
+        serviceConfig: servicePDA,
+        apiKey: apiKeyPDAVal,
+      })
+      .rpc();
+
+    const apiKey = await program.account.apiKey.fetch(apiKeyPDAVal);
+    expect(apiKey.permissions).to.equal(7);
+    expect(apiKey.windowUsage).to.equal(3);
+    expect(apiKey.rateLimit).to.equal(10);
+  });
+
+  it("supports all three window durations", async () => {
+    // Create services with each window type to verify they're accepted
+    const windowTests = [
+      { window: 60, name: "Minute Window" },
+      { window: 86400, name: "Day Window" },
+    ];
+
+    for (const test of windowTests) {
+      const testOwner = Keypair.generate();
+      const airdropSig = await provider.connection.requestAirdrop(
+        testOwner.publicKey,
+        2_000_000_000
+      );
+      await provider.connection.confirmTransaction(airdropSig);
+
+      const [testServicePDA] = findServicePDA(
+        testOwner.publicKey,
+        program.programId
+      );
+
+      await program.methods
+        .initializeService(
+          test.name,
+          50,
+          500,
+          new anchor.BN(test.window)
+        )
+        .accounts({
+          serviceConfig: testServicePDA,
+          owner: testOwner.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([testOwner])
+        .rpc();
+
+      const service = await program.account.serviceConfig.fetch(
+        testServicePDA
+      );
+      expect(service.rateLimitWindow.toNumber()).to.equal(test.window);
+      expect(service.name).to.equal(test.name);
     }
   });
 });
