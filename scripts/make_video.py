@@ -127,6 +127,26 @@ SLIDES = [
         "layout": "trust"
     },
     {
+        "title": "Live on Devnet",
+        "subtitle": "Deployed and tested with real transactions",
+        "bullets": [
+            ("Program deployed", "7uXfzJU...Qt58 on devnet"),
+            ("7 transactions", "All instructions tested end-to-end"),
+            ("Full lifecycle", "Create → Validate → Use → Update → Revoke → Close"),
+            ("Free validation", "validate_key and check_permission cost nothing"),
+        ],
+        "narration": (
+            "This program is deployed and running on Solana devnet right now. "
+            "Seven real transactions cover the full API key lifecycle: "
+            "creating a service, issuing keys, validating them for free via RPC simulation, "
+            "recording usage to enforce rate limits, updating key permissions, "
+            "revoking a key, and closing it to reclaim rent. "
+            "Every transaction is verifiable on Solana Explorer. "
+            "This isn't a simulation. It's real on-chain state."
+        ),
+        "layout": "list"
+    },
+    {
         "title": "Production Quality",
         "subtitle": "52 tests • 1,070-line SDK • 13 CLI commands",
         "bullets": [
@@ -138,11 +158,32 @@ SLIDES = [
         "narration": (
             "This isn't a proof of concept. "
             "Fifty-two tests, all passing. "
-            "A thousand-line TypeScript SDK. Thirteen CLI commands. "
-            "Hash-based key storage matching Stripe's pattern. "
-            "Owner-gated writes. Checked arithmetic. No dependencies beyond Anchor."
+            "A thousand-line TypeScript SDK with full CRUD operations. "
+            "Thirteen CLI commands for complete service management. "
+            "Hash-based key storage matching how Stripe and OpenAI handle API keys. "
+            "Owner-gated writes. Checked arithmetic. Zero dependencies beyond Anchor."
         ),
         "layout": "stats"
+    },
+    {
+        "title": "Why Migrations Track",
+        "subtitle": "A real Web2 → Solana translation",
+        "bullets": [
+            ("Real pattern", "API key management is universal infrastructure"),
+            ("Honest analysis", "What maps cleanly, what doesn't, and why"),
+            ("Quantified tradeoffs", "Latency, cost, throughput — real numbers"),
+            ("Production-ready", "Not a toy — a deployable system"),
+        ],
+        "narration": (
+            "This is a genuine migration of production infrastructure to Solana. "
+            "Not a wrapper. Not a theoretical exercise. "
+            "A real backend pattern rebuilt as an on-chain program. "
+            "The README documents every design decision: "
+            "why SHA-256, why bitmask permissions, why the PDA seeds are structured this way. "
+            "An honest analysis of what works and what changes "
+            "when you move from a trusted database to a public blockchain."
+        ),
+        "layout": "trust"
     },
     {
         "title": "Try It Yourself",
@@ -154,11 +195,12 @@ SLIDES = [
         ],
         "narration": (
             "Try it yourself. There's an interactive dashboard where you can "
-            "create keys, validate them, and test rate limiting in your browser. "
-            "Full source on GitHub. "
+            "create keys, validate them, check permissions, and test rate limiting. "
+            "All in your browser. "
+            "The full source code is on GitHub with deployment instructions. "
             "The same patterns developers already know, "
-            "with verifiable enforcement on Solana. "
-            "Thank you."
+            "with verifiable, trustless enforcement on Solana. "
+            "Thank you for watching."
         ),
         "layout": "cta"
     },
