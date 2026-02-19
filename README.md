@@ -358,7 +358,7 @@ The on-chain system becomes expensive when:
 anchor build
 ```
 
-### Test (45 test cases, local validator)
+### Test (49 test cases, local validator)
 ```bash
 npm install
 anchor test --validator legacy
