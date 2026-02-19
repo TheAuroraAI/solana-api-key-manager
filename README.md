@@ -602,7 +602,7 @@ Events can be indexed by Helius, Shyft, or geyser plugins for dashboards, analyt
 ├── client/
 │   └── src/
 │       ├── cli.ts                        # 12-command CLI client
-│       └── sdk.ts                        # TypeScript SDK (926 lines)
+│       └── sdk.ts                        # TypeScript SDK (1,072 lines)
 ├── scripts/
 │   └── deploy-devnet.sh                  # Automated deployment + smoke test
 ├── Anchor.toml                           # Anchor configuration
