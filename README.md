@@ -246,7 +246,21 @@ The on-chain system becomes expensive when:
 - You need sub-second rate limit precision
 - Request volume exceeds ~50K/day and you're paying per transaction
 
-**Hybrid approach**: Use `validate_key` (free) for authorization, batch `record_usage` off-chain and settle periodically. E.g., record every 10th request on-chain. 90% cost reduction with 10% precision loss.
+**Hybrid approach**: Use `validate_key` (free) for authorization, batch `record_usage` off-chain and settle periodically:
+
+```typescript
+// Hybrid pattern: free validation + batched usage recording
+const { valid } = await sdk.simulateValidateKey(rawKey);  // FREE
+if (!valid) return res.status(403).json({ error: "Invalid key" });
+
+localCounter[rawKey] = (localCounter[rawKey] || 0) + 1;
+if (localCounter[rawKey] % 10 === 0) {
+  await sdk.recordUsage(rawKey);  // On-chain every 10th request
+  localCounter[rawKey] = 0;
+}
+```
+
+This gives 90% cost reduction with 10% precision loss on rate limit enforcement.
 
 ## Quantitative Comparison
 
@@ -306,6 +320,35 @@ The on-chain system becomes expensive when:
 | **Service takeover** | PDA seeded by owner pubkey + `has_one = owner` constraint on all write operations |
 | **Invalid permission bits** | `permissions::is_valid()` checks mask against `ALL` constant |
 | **Duplicate key creation** | PDA seeds include key_hash — same hash = same PDA address = creation fails |
+
+## Cross-Program Invocation (CPI) Example
+
+Other Solana programs can validate API keys via CPI, enabling trustless on-chain middleware:
+
+```rust
+// In your program that needs API key validation:
+use anchor_lang::prelude::*;
+
+pub fn protected_action(ctx: Context<ProtectedAction>) -> Result<()> {
+    // CPI into the API Key Manager to validate the key
+    let cpi_program = ctx.accounts.api_key_program.to_account_info();
+    let cpi_accounts = api_key_manager::cpi::accounts::ValidateKey {
+        service_config: ctx.accounts.service_config.to_account_info(),
+        api_key: ctx.accounts.api_key.to_account_info(),
+    };
+    let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+    api_key_manager::cpi::validate_key(cpi_ctx)?;
+
+    // Key is valid — proceed with your logic
+    msg!("API key validated via CPI, executing protected action");
+    Ok(())
+}
+```
+
+This pattern enables:
+- **On-chain API gateways**: Programs that accept requests only from valid API key holders
+- **Composable authorization**: Multiple programs sharing the same key registry
+- **Trustless middleware**: No off-chain server needed for key validation
 
 ## Program Architecture
 
