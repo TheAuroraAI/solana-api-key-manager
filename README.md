@@ -115,8 +115,9 @@ ApiKey PDA: seeds = [b"apikey", service_pubkey, key_hash]
 | 5 | `check_permission` | Authorization middleware | Anyone | Free (RPC read) |
 | 6 | `record_usage` | Rate limit middleware | Owner only | ~0.000005 SOL (tx) |
 | 7 | `update_key` | `PATCH /keys/:hash` | Owner only | ~0.000005 SOL (tx) |
-| 8 | `revoke_key` | `DELETE /keys/:hash` (soft) | Owner only | ~0.000005 SOL (tx) |
-| 9 | `close_key` | `DELETE /keys/:hash` (hard) | Owner only | Reclaims ~0.002 SOL |
+| 8 | `rotate_key` | `POST /keys/:hash/rotate` | Owner only | ~0.002 SOL (net: new rent - old reclaim) |
+| 9 | `revoke_key` | `DELETE /keys/:hash` (soft) | Owner only | ~0.000005 SOL (tx) |
+| 10 | `close_key` | `DELETE /keys/:hash` (hard) | Owner only | Reclaims ~0.002 SOL |
 
 ### How It Works in Practice
 
@@ -483,7 +484,7 @@ The SDK exports:
 
 ## CLI Client
 
-A 12-command CLI for managing services and keys:
+A 13-command CLI for managing services and keys:
 
 ```bash
 cd client && npm install
@@ -499,6 +500,7 @@ npx ts-node src/cli.ts validate-key --key <API_KEY>
 npx ts-node src/cli.ts check-permission --key <API_KEY> --permission 4
 npx ts-node src/cli.ts record-usage --key <API_KEY>
 npx ts-node src/cli.ts update-key --key <API_KEY> --permissions 7 --rate-limit 5000
+npx ts-node src/cli.ts rotate-key --key <API_KEY>
 npx ts-node src/cli.ts revoke-key --key <API_KEY>
 npx ts-node src/cli.ts close-key --key <API_KEY>
 npx ts-node src/cli.ts list-keys
@@ -601,7 +603,7 @@ Events can be indexed by Helius, Shyft, or geyser plugins for dashboards, analyt
 ├── tests/api-key-manager.ts              # 52 test cases
 ├── client/
 │   └── src/
-│       ├── cli.ts                        # 12-command CLI client
+│       ├── cli.ts                        # 13-command CLI client
 │       └── sdk.ts                        # TypeScript SDK (1,072 lines)
 ├── scripts/
 │   └── deploy-devnet.sh                  # Automated deployment + smoke test

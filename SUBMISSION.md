@@ -13,7 +13,7 @@ https://github.com/TheAuroraAI/solana-api-key-manager
 - **Rust program**: 833 lines, 10 instructions, 13 error types, 10 events
 - **52 test cases**: All passing. Covers service lifecycle, key CRUD, permissions, rate limiting, access control, edge cases, rent reclamation, key rotation, and full integration flows
 - **TypeScript SDK**: 1,072 lines with full JSDoc, typed interfaces, PDA helpers, free simulation methods
-- **CLI client**: 12 commands for all operations including data export
+- **CLI client**: 13 commands for all operations including key rotation and data export
 - **Devnet deployment**: [PENDING — transaction links will be added]
 
 ## Architecture Highlights

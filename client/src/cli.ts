@@ -521,6 +521,54 @@ program
   });
 
 // ============================================================================
+// rotate-key
+// ============================================================================
+program
+  .command("rotate-key")
+  .description("Atomically rotate an API key — revokes old key and creates new one in a single transaction")
+  .requiredOption("--key <api-key>", "The current API key to rotate")
+  .option("-l, --label <label>", "New label (defaults to existing label)")
+  .action(async (opts) => {
+    const parentOpts = program.opts();
+    const connection = getConnection(parentOpts.cluster);
+    const wallet = loadKeypair(parentOpts.keypair);
+    const prog = await getProgram(connection, wallet);
+
+    const [servicePDA] = findServicePDA(wallet.publicKey);
+    const oldKeyHash = hashApiKey(opts.key);
+    const [oldApiKeyPDA] = findApiKeyPDA(servicePDA, oldKeyHash);
+
+    const newRawKey = generateApiKey();
+    const newKeyHash = hashApiKey(newRawKey);
+    const [newApiKeyPDA] = findApiKeyPDA(servicePDA, newKeyHash);
+
+    const newLabel = opts.label || null;
+
+    console.log(chalk.blue("\n  Rotating API key...\n"));
+
+    const tx = await prog.methods
+      .rotateKey(Array.from(oldKeyHash), Array.from(newKeyHash), newLabel)
+      .accounts({
+        serviceConfig: servicePDA,
+        oldApiKey: oldApiKeyPDA,
+        newApiKey: newApiKeyPDA,
+        owner: wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([wallet])
+      .rpc();
+
+    console.log(chalk.green("  Key rotated!\n"));
+    console.log(chalk.yellow(`  New API Key: ${newRawKey}`));
+    console.log(`  Old key:     revoked + closed (rent reclaimed)`);
+    console.log(`  Transaction: ${tx}`);
+    console.log(`  Explorer:    ${explorerUrl(tx, parentOpts.cluster)}`);
+    console.log(
+      chalk.red(`\n  ⚠ Save your new API key now! It cannot be recovered.\n`)
+    );
+  });
+
+// ============================================================================
 // close-key
 // ============================================================================
 program
