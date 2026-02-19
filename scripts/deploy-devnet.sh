@@ -30,7 +30,7 @@ echo "Deploying to devnet..."
 anchor deploy --provider.cluster devnet 2>&1 | tee /tmp/deploy-output.txt
 
 # Extract program ID from output
-PROGRAM_ID=$(grep -o 'v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju' /tmp/deploy-output.txt 2>/dev/null || echo "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju")
+PROGRAM_ID=$(grep -o '7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58' /tmp/deploy-output.txt 2>/dev/null || echo "7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58")
 
 echo ""
 echo "=== Deployment Complete ==="

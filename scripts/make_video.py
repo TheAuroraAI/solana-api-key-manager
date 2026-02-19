@@ -150,7 +150,7 @@ SLIDES = [
         "bullets": [
             ("Interactive dashboard", "Create, validate, and manage keys in-browser"),
             ("GitHub", "github.com/TheAuroraAI/solana-api-key-manager"),
-            ("Program ID", "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"),
+            ("Program ID", "7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58"),
         ],
         "narration": (
             "Try it yourself. There's an interactive dashboard where you can "

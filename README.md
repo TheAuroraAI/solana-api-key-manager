@@ -4,7 +4,7 @@ A traditional API key management backend rebuilt as a Solana program using the A
 
 Built for the [Superteam "Rebuild Production Backend Systems as On-Chain Rust Programs"](https://earn.superteam.fun/listings/bounties/rebuild-production-backend-systems-as-on-chain-rust-programs/) bounty.
 
-**Program ID**: `v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju`
+**Program ID**: `7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58`
 
 ## Why API Key Management?
 
@@ -356,7 +356,7 @@ This pattern enables:
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                   api_key_manager Program                     │
-│                   v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju│
+│                   7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58│
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │  Instructions (10):                                          │
@@ -592,7 +592,7 @@ Events can be indexed by Helius, Shyft, or geyser plugins for dashboards, analyt
 
 ## Devnet Deployment
 
-- **Program ID**: `v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju`
+- **Program ID**: `7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58`
 - **Cluster**: Devnet
 - **Example transactions**: *(pending devnet SOL — faucet rate-limited globally)*
 
