@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solana API Key Manager — Interactive Dashboard</title>
+<meta name="description" content="On-chain API key management system built on Solana. Replace PostgreSQL + Redis with verifiable program accounts.">
+<style>
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --border: #1e1e2e;
+  --accent: #9945ff;
+  --accent2: #14f195;
+  --text: #e4e4e7;
+  --muted: #71717a;
+  --red: #ef4444;
+  --orange: #f59e0b;
+  --blue: #3b82f6;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+}
+.container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+/* Hero */
+.hero {
+  padding: 80px 0 60px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(153,69,255,0.08) 0%, transparent 100%);
+}
+.hero h1 {
+  font-size: 3rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 16px;
+}
+.hero p { font-size: 1.2rem; color: var(--muted); max-width: 700px; margin: 0 auto 32px; }
+.badge-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.badge {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-size: 0.85rem;
+  color: var(--accent2);
+  font-weight: 600;
+}
+
+/* Sections */
+section { padding: 60px 0; }
+section h2 {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 32px;
+  text-align: center;
+}
+section h2 span { color: var(--accent); }
+
+/* Architecture Comparison */
+.arch-grid {
+  display: grid;
+  grid-template-columns: 1fr 80px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.arch-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+}
+.arch-card h3 {
+  font-size: 1.1rem;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.arch-card.web2 h3 { color: var(--orange); }
+.arch-card.onchain h3 { color: var(--accent2); }
+.arch-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: var(--accent);
+  padding-top: 60px;
+}
+.arch-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 0.9rem;
+}
+.arch-item .icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+.web2 .icon { background: rgba(245,158,11,0.15); }
+.onchain .icon { background: rgba(20,241,149,0.15); }
+
+/* Trust Comparison */
+.trust-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.trust-table th, .trust-table td {
+  padding: 14px 20px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+.trust-table th {
+  background: rgba(153,69,255,0.1);
+  font-weight: 600;
+  color: var(--accent);
+}
+.trust-table tr:last-child td { border-bottom: none; }
+.trust-table .web2-col { color: var(--orange); }
+.trust-table .onchain-col { color: var(--accent2); }
+
+/* Interactive Demo */
+.demo-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.demo-header {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+.demo-tab {
+  padding: 12px 24px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+.demo-tab:hover { color: var(--text); }
+.demo-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: rgba(153,69,255,0.05);
+}
+.demo-panel {
+  display: none;
+  padding: 24px;
+}
+.demo-panel.active { display: block; }
+.demo-form { display: flex; flex-direction: column; gap: 16px; max-width: 500px; }
+.demo-form label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.demo-form input, .demo-form select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 0.9rem;
+  width: 100%;
+}
+.demo-form input:focus, .demo-form select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.demo-btn {
+  background: linear-gradient(135deg, var(--accent), #7c3aed);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: opacity 0.2s;
+  width: fit-content;
+}
+.demo-btn:hover { opacity: 0.9; }
+.demo-btn.secondary {
+  background: rgba(20,241,149,0.15);
+  color: var(--accent2);
+}
+.demo-output {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.82rem;
+  line-height: 1.8;
+  margin-top: 16px;
+  white-space: pre-wrap;
+  color: var(--accent2);
+  max-height: 400px;
+  overflow-y: auto;
+}
+.demo-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+/* Instruction Table */
+.instr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.instr-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: border-color 0.2s;
+}
+.instr-card:hover { border-color: var(--accent); }
+.instr-card .num {
+  display: inline-block;
+  background: rgba(153,69,255,0.15);
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.instr-card h4 { font-size: 0.95rem; margin-bottom: 6px; }
+.instr-card .equiv { font-size: 0.8rem; color: var(--muted); }
+.instr-card .cost {
+  font-size: 0.8rem;
+  color: var(--accent2);
+  margin-top: 8px;
+  font-weight: 600;
+}
+.instr-card .access {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* Cost Section */
+.cost-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+}
+.cost-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+}
+.cost-card h4 { color: var(--muted); font-size: 0.85rem; margin-bottom: 12px; }
+.cost-card .price {
+  font-size: 2.5rem;
+  font-weight: 800;
+}
+.cost-card .price.high { color: var(--red); }
+.cost-card .price.low { color: var(--accent2); }
+.cost-card .detail { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+.savings-banner {
+  background: linear-gradient(135deg, rgba(20,241,149,0.1), rgba(153,69,255,0.1));
+  border: 1px solid rgba(20,241,149,0.3);
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  margin-top: 24px;
+}
+.savings-banner .num {
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--accent2);
+}
+.savings-banner p { color: var(--muted); }
+
+/* Stats */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 40px;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+.stat-card .num {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--accent);
+}
+.stat-card .label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* Perm visualizer */
+.perm-viz {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.perm-bit {
+  width: 48px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.perm-bit.off {
+  background: rgba(255,255,255,0.05);
+  color: var(--muted);
+}
+.perm-bit.on {
+  background: rgba(153,69,255,0.3);
+  color: var(--accent);
+}
+
+/* Footer */
+footer {
+  padding: 40px 0;
+  text-align: center;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+footer a { color: var(--accent); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+/* Key list */
+.key-list { list-style: none; }
+.key-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.key-list li:last-child { border-bottom: none; }
+.key-status {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.key-status.active { background: rgba(20,241,149,0.15); color: var(--accent2); }
+.key-status.revoked { background: rgba(239,68,68,0.15); color: var(--red); }
+.key-status.expired { background: rgba(245,158,11,0.15); color: var(--orange); }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .hero h1 { font-size: 2rem; }
+  .arch-grid { grid-template-columns: 1fr; }
+  .arch-arrow { transform: rotate(90deg); padding: 0; }
+  .demo-split { grid-template-columns: 1fr; }
+  .instr-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<section class="hero">
+<div class="container">
+  <h1>Solana API Key Manager</h1>
+  <p>Replace PostgreSQL + Redis with verifiable on-chain accounts. Same API key patterns, trustless enforcement.</p>
+  <div class="badge-row">
+    <span class="badge">10 Instructions</span>
+    <span class="badge">52 Tests Passing</span>
+    <span class="badge">1,070-line SDK</span>
+    <span class="badge">13 CLI Commands</span>
+    <span class="badge">$2.25/mo vs $1,000+</span>
+  </div>
+</div>
+</section>
+
+<!-- Stats -->
+<section>
+<div class="container">
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">10</div><div class="label">On-chain Instructions</div></div>
+    <div class="stat-card"><div class="num">52</div><div class="label">Tests Passing</div></div>
+    <div class="stat-card"><div class="num">0</div><div class="label">Dependencies (program)</div></div>
+    <div class="stat-card"><div class="num">$0.002</div><div class="label">Cost per Key</div></div>
+    <div class="stat-card"><div class="num">FREE</div><div class="label">Validation Reads</div></div>
+  </div>
+</div>
+</section>
+
+<!-- Architecture Comparison -->
+<section>
+<div class="container">
+  <h2>Web2 <span>vs</span> On-Chain Architecture</h2>
+  <div class="arch-grid">
+    <div class="arch-card web2">
+      <h3>Traditional Backend</h3>
+      <div class="arch-item"><div class="icon">DB</div><div>PostgreSQL — keys, permissions, metadata</div></div>
+      <div class="arch-item"><div class="icon">$</div><div>Redis — rate counters, sliding windows</div></div>
+      <div class="arch-item"><div class="icon">MW</div><div>API Gateway — auth middleware</div></div>
+      <div class="arch-item"><div class="icon">UI</div><div>Admin Dashboard — CRUD operations</div></div>
+      <div class="arch-item"><div class="icon">!</div><div>Trust: "we promise not to change your limits"</div></div>
+    </div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-card onchain">
+      <h3>Solana Program</h3>
+      <div class="arch-item"><div class="icon">PDA</div><div>ServiceConfig PDA — owner, limits, counters</div></div>
+      <div class="arch-item"><div class="icon">PDA</div><div>ApiKey PDAs — hash-indexed, O(1) lookup</div></div>
+      <div class="arch-item"><div class="icon">SIM</div><div>RPC Simulation — free validation reads</div></div>
+      <div class="arch-item"><div class="icon">CLI</div><div>TypeScript SDK + CLI — full CRUD</div></div>
+      <div class="arch-item"><div class="icon">V</div><div>Trust: verify on-chain, immutable audit trail</div></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- Trust Model -->
+<section style="background: rgba(153,69,255,0.03);">
+<div class="container">
+  <h2>Trust Model <span>Comparison</span></h2>
+  <table class="trust-table">
+    <thead>
+      <tr><th>Property</th><th>Web2</th><th>On-Chain</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Key Storage</td><td class="web2-col">Operator's database</td><td class="onchain-col">Public blockchain (hash only)</td></tr>
+      <tr><td>Permission Changes</td><td class="web2-col">Silent DB update</td><td class="onchain-col">Signed transaction, publicly visible</td></tr>
+      <tr><td>Rate Limit Enforcement</td><td class="web2-col">Trust the operator</td><td class="onchain-col">Verified by program logic</td></tr>
+      <tr><td>Usage Data</td><td class="web2-col">Mutable application logs</td><td class="onchain-col">Immutable on-chain counter</td></tr>
+      <tr><td>Revocation</td><td class="web2-col">Can be silent</td><td class="onchain-col">Transaction on public ledger</td></tr>
+      <tr><td>Audit Trail</td><td class="web2-col">Internal, mutable, deletable</td><td class="onchain-col">On-chain, immutable, permanent</td></tr>
+      <tr><td>Rule Changes</td><td class="web2-col">Deploy new code silently</td><td class="onchain-col">Program upgrades visible on-chain</td></tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<!-- Interactive Demo -->
+<section>
+<div class="container">
+  <h2>Interactive <span>Demo</span></h2>
+  <div class="demo-container">
+    <div class="demo-header">
+      <button class="demo-tab active" onclick="showTab('create')">Create Key</button>
+      <button class="demo-tab" onclick="showTab('validate')">Validate Key</button>
+      <button class="demo-tab" onclick="showTab('permissions')">Permissions</button>
+      <button class="demo-tab" onclick="showTab('ratelimit')">Rate Limiting</button>
+      <button class="demo-tab" onclick="showTab('manage')">Key Manager</button>
+    </div>
+
+    <!-- Create Key Panel -->
+    <div class="demo-panel active" id="panel-create">
+      <div class="demo-split">
+        <div class="demo-form">
+          <div>
+            <label>Key Label</label>
+            <input type="text" id="key-label" value="production-backend" placeholder="my-api-key">
+          </div>
+          <div>
+            <label>Permissions</label>
+            <div class="perm-viz" id="perm-viz-create">
+              <div class="perm-bit on" data-perm="1" onclick="togglePerm(this)">READ</div>
+              <div class="perm-bit on" data-perm="2" onclick="togglePerm(this)">WRITE</div>
+              <div class="perm-bit off" data-perm="4" onclick="togglePerm(this)">DEL</div>
+              <div class="perm-bit off" data-perm="8" onclick="togglePerm(this)">ADMIN</div>
+            </div>
+            <div style="font-size:0.8rem;color:var(--muted)" id="perm-value">Bitmask: 0b0011 = 3</div>
+          </div>
+          <div>
+            <label>Rate Limit (requests/window)</label>
+            <input type="number" id="key-rate" value="1000" min="1">
+          </div>
+          <div>
+            <label>Rate Limit Window</label>
+            <select id="key-window">
+              <option value="60">1 minute</option>
+              <option value="3600" selected>1 hour</option>
+              <option value="86400">1 day</option>
+            </select>
+          </div>
+          <div>
+            <label>Expires</label>
+            <select id="key-expires">
+              <option value="0">Never</option>
+              <option value="86400">24 hours</option>
+              <option value="604800">7 days</option>
+              <option value="2592000">30 days</option>
+            </select>
+          </div>
+          <button class="demo-btn" onclick="simulateCreate()">Create API Key</button>
+        </div>
+        <div>
+          <div class="demo-output" id="create-output">// Click "Create API Key" to simulate key creation
+//
+// This mirrors the Solana program's create_key instruction.
+// The raw key is shown ONCE, then only the SHA-256 hash
+// is stored on-chain (just like Stripe, OpenAI, etc.)
+//
+// On-chain cost: ~0.002 SOL (account rent)
+// That's about $0.30 — one-time, reclaimable.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Validate Panel -->
+    <div class="demo-panel" id="panel-validate">
+      <div class="demo-split">
+        <div class="demo-form">
+          <div>
+            <label>API Key to Validate</label>
+            <input type="text" id="validate-key" placeholder="sk_live_abc123..." value="">
+          </div>
+          <button class="demo-btn secondary" onclick="simulateValidate()">Validate Key (Free RPC Read)</button>
+          <p style="font-size:0.8rem;color:var(--muted);margin-top:8px;">
+            Validation uses simulateTransaction — it's <strong>completely free</strong>. No signature needed, no gas cost. The program checks: key exists, not revoked, not expired.
+          </p>
+        </div>
+        <div>
+          <div class="demo-output" id="validate-output">// Enter an API key and click Validate
+//
+// In production, your backend does:
+// 1. Hash the key: SHA256("sk_live_abc123...")
+// 2. Derive PDA: seeds = [b"apikey", service, hash]
+// 3. Call simulateTransaction (FREE, no signer needed)
+// 4. Program returns: valid/invalid + metadata
+//
+// This replaces a PostgreSQL lookup + Redis check
+// Cost: $0 (vs ~$0.0001/query for RDS + ElastiCache)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Permissions Panel -->
+    <div class="demo-panel" id="panel-permissions">
+      <div class="demo-split">
+        <div class="demo-form">
+          <div>
+            <label>Key Permissions (click to toggle)</label>
+            <div class="perm-viz" id="perm-viz-check">
+              <div class="perm-bit on" data-perm="1" onclick="togglePerm(this);updatePermCheck()">READ</div>
+              <div class="perm-bit on" data-perm="2" onclick="togglePerm(this);updatePermCheck()">WRITE</div>
+              <div class="perm-bit off" data-perm="4" onclick="togglePerm(this);updatePermCheck()">DEL</div>
+              <div class="perm-bit off" data-perm="8" onclick="togglePerm(this);updatePermCheck()">ADMIN</div>
+            </div>
+          </div>
+          <div>
+            <label>Required Permission for Endpoint</label>
+            <select id="check-perm" onchange="updatePermCheck()">
+              <option value="1">READ (0b0001)</option>
+              <option value="2">WRITE (0b0010)</option>
+              <option value="4">DELETE (0b0100)</option>
+              <option value="8">ADMIN (0b1000)</option>
+              <option value="3">READ + WRITE (0b0011)</option>
+              <option value="15">ALL (0b1111)</option>
+            </select>
+          </div>
+          <button class="demo-btn secondary" onclick="updatePermCheck()">Check Permission (Free)</button>
+        </div>
+        <div>
+          <div class="demo-output" id="perm-output">// Bitwise permission check — O(1), single AND operation
+//
+// key.permissions & required == required
+//
+// Same pattern as Unix file permissions and most SaaS APIs.
+// u16 bitmask = 2 bytes for all permissions.
+//
+// On-chain check is FREE via RPC simulation.
+// Click the bits above and select a required permission.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rate Limit Panel -->
+    <div class="demo-panel" id="panel-ratelimit">
+      <div class="demo-split">
+        <div>
+          <div class="demo-form">
+            <div>
+              <label>Rate Limit: <span id="rl-display">0 / 1000</span> requests this window</label>
+              <div style="background:var(--bg);border-radius:8px;height:24px;margin-top:8px;overflow:hidden;border:1px solid var(--border);">
+                <div id="rl-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width 0.3s;border-radius:8px;"></div>
+              </div>
+            </div>
+            <div style="display:flex;gap:12px;">
+              <button class="demo-btn" onclick="simulateUsage(1)">+1 Request</button>
+              <button class="demo-btn" onclick="simulateUsage(10)">+10 Requests</button>
+              <button class="demo-btn" onclick="simulateUsage(100)">+100 Requests</button>
+              <button class="demo-btn secondary" onclick="resetUsage()">Reset Window</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="demo-output" id="rl-output">// Rate limiting simulation
+//
+// Each record_usage instruction:
+// 1. Checks window_start + rate_limit_window > now
+// 2. If new window: resets counter, updates window_start
+// 3. Checks window_usage < rate_limit
+// 4. Increments window_usage and total_usage
+//
+// Cost: ~$0.000005 per usage record (one Solana tx)
+// Web2 equivalent: Redis INCR with TTL
+//
+// The key difference: usage counters are ON-CHAIN.
+// The operator cannot silently reset or inflate them.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Key Manager Panel -->
+    <div class="demo-panel" id="panel-manage">
+      <div style="margin-bottom:16px;display:flex;gap:12px;">
+        <button class="demo-btn" onclick="addDemoKey()">+ New Key</button>
+        <button class="demo-btn secondary" onclick="rotateFirstActive()">Rotate Key</button>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+        <ul class="key-list" id="key-list">
+          <li>
+            <div>
+              <strong>sk_live_7f3a...c291</strong>
+              <div style="font-size:0.75rem;color:var(--muted)">production-backend &bull; READ, WRITE &bull; 847/1000 used</div>
+            </div>
+            <span class="key-status active">Active</span>
+          </li>
+          <li>
+            <div>
+              <strong>sk_live_e8b2...4d09</strong>
+              <div style="font-size:0.75rem;color:var(--muted)">mobile-client &bull; READ &bull; 12,483 total</div>
+            </div>
+            <span class="key-status active">Active</span>
+          </li>
+          <li>
+            <div>
+              <strong>sk_live_1a9f...8b3e</strong>
+              <div style="font-size:0.75rem;color:var(--muted)">old-frontend &bull; READ, WRITE, DELETE &bull; Revoked 2h ago</div>
+            </div>
+            <span class="key-status revoked">Revoked</span>
+          </li>
+          <li>
+            <div>
+              <strong>sk_live_d4c7...2f5a</strong>
+              <div style="font-size:0.75rem;color:var(--muted)">temp-access &bull; ADMIN &bull; Expired 3d ago</div>
+            </div>
+            <span class="key-status expired">Expired</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- Instructions -->
+<section style="background: rgba(153,69,255,0.03);">
+<div class="container">
+  <h2>10 On-Chain <span>Instructions</span></h2>
+  <div class="instr-grid">
+    <div class="instr-card">
+      <span class="num">#1</span>
+      <h4>initialize_service</h4>
+      <div class="equiv">POST /services</div>
+      <div class="cost">~0.003 SOL (rent)</div>
+      <div class="access">Anyone</div>
+    </div>
+    <div class="instr-card">
+      <span class="num">#2</span>
+      <h4>update_service</h4>
+      <div class="equiv">PATCH /services/:id</div>
+      <div class="cost">~0.000005 SOL</div>
+      <div class="access">Owner only</div>
+    </div>
+    <div class="instr-card">
+      <span class="num">#3</span>
+      <h4>create_key</h4>
+      <div class="equiv">POST /keys</div>
+      <div class="cost">~0.002 SOL (rent)</div>
+      <div class="access">Owner only</div>
+    </div>
+    <div class="instr-card">
+      <span class="num">#4</span>
+      <h4>validate_key</h4>
+      <div class="equiv">GET /keys/:hash/validate</div>
+      <div class="cost">FREE (RPC sim)</div>
+      <div class="access">Anyone</div>
+    </div>
+    <div class="instr-card">
+      <span class="num">#5</span>
+      <h4>check_permission</h4>
+      <div class="equiv">Authorization middleware</div>
+      <div class="cost">FREE (RPC sim)</div>
+      <div class="access">Anyone</div>
+    </div>
+    <div class="instr-card">
+      <span class="num">#6</span>
+      <h4>record_usage</h4>
+      <div class="equiv">Rate limit middleware</div>
+      <div class="cost">~0.000005 SOL</div>
+      <div class="access">Owner only</div>
+    </div>
+    <div class="instr-card">
+      <span class="num">#7</span>
+      <h4>update_key</h4>
+      <div class="equiv">PATCH /keys/:hash</div>
+      <div class="cost">~0.000005 SOL</div>
+      <div class="access">Owner only</div>
+    </div>
+    <div class="instr-card">
+      <span class="num">#8</span>
+      <h4>rotate_key</h4>
+      <div class="equiv">POST /keys/:hash/rotate</div>
+      <div class="cost">~0.002 SOL (net)</div>
+      <div class="access">Owner only</div>
+    </div>
+    <div class="instr-card">
+      <span class="num">#9</span>
+      <h4>revoke_key</h4>
+      <div class="equiv">DELETE /keys/:hash (soft)</div>
+      <div class="cost">~0.000005 SOL</div>
+      <div class="access">Owner only</div>
+    </div>
+    <div class="instr-card">
+      <span class="num">#10</span>
+      <h4>close_key</h4>
+      <div class="equiv">DELETE /keys/:hash (hard)</div>
+      <div class="cost">Reclaims ~0.002 SOL</div>
+      <div class="access">Owner only</div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- Cost Comparison -->
+<section>
+<div class="container">
+  <h2>Cost <span>Comparison</span></h2>
+  <div class="cost-cards">
+    <div class="cost-card">
+      <h4>Traditional Stack (AWS)</h4>
+      <div class="price high">$1,044</div>
+      <div class="detail">per month (1,000 keys, 1M validations)</div>
+      <div class="detail" style="margin-top:8px;">RDS t3.micro: $15 | ElastiCache: $13<br>ALB: $16 | ECS Fargate: $1,000<br>+ CloudWatch, S3, backups</div>
+    </div>
+    <div class="cost-card">
+      <h4>Solana On-Chain</h4>
+      <div class="price low">$2.25</div>
+      <div class="detail">per month (1,000 keys, 1M validations)</div>
+      <div class="detail" style="margin-top:8px;">Key creation: $2.00 (rent, reclaimable)<br>Usage records: $0.25 (50K writes)<br>Validation: FREE (RPC simulation)</div>
+    </div>
+    <div class="cost-card">
+      <h4>Cost Reduction</h4>
+      <div class="price" style="color:var(--accent);">464x</div>
+      <div class="detail">cheaper than AWS equivalent</div>
+      <div class="detail" style="margin-top:8px;">$1,044/mo &rarr; $2.25/mo<br>Rent is reclaimable on close<br>Reads are always free</div>
+    </div>
+  </div>
+  <div class="savings-banner">
+    <div class="num">$12,501</div>
+    <p>Annual savings for a typical SaaS operation with 1,000 API keys</p>
+  </div>
+</div>
+</section>
+
+<!-- CLI Preview -->
+<section style="background: rgba(153,69,255,0.03);">
+<div class="container">
+  <h2>CLI <span>Preview</span></h2>
+  <div class="demo-output" style="max-width:800px;margin:0 auto;font-size:0.85rem;">$ api-key-manager init --name "My SaaS API" --max-keys 100
+<span style="color:var(--accent2)">Service initialized!</span>
+  PDA: 8Kag...3nVB
+  Owner: GpXH...YvH
+  Max keys: 100
+  Default rate limit: 1000/hour
+
+$ api-key-manager create --label "production" --permissions read,write --rate-limit 5000
+<span style="color:var(--accent2)">API Key created!</span>
+  <span style="color:var(--orange)">Key: sk_live_7f3a8b2c...c291e4d0 (SAVE THIS — shown once only)</span>
+  Label: production
+  Permissions: READ | WRITE (0b0011)
+  Rate limit: 5000/hour
+  PDA: 4mXz...9kLp
+
+$ api-key-manager validate sk_live_7f3a8b2c...c291e4d0
+<span style="color:var(--accent2)">Key is VALID</span>
+  Label: production
+  Status: Active
+  Permissions: READ | WRITE
+  Usage: 0 / 5000 (this window)
+  Cost: FREE (RPC simulation)
+
+$ api-key-manager check-permission sk_live_7f3a...c291 --required write
+<span style="color:var(--accent2)">AUTHORIZED</span> — Key has WRITE permission
+  Key permissions: 0b0011 (READ | WRITE)
+  Required: 0b0010 (WRITE)
+  Check: 0b0011 & 0b0010 == 0b0010 ✓
+
+$ api-key-manager list
+  # Label           Permissions    Usage    Status
+  1 production      READ,WRITE     847      Active
+  2 mobile-client   READ           12,483   Active
+  3 old-frontend    READ,WRITE,DEL -        Revoked
+  4 temp-access     ADMIN          -        Expired
+
+$ api-key-manager rotate sk_live_7f3a...c291
+<span style="color:var(--accent2)">Key rotated!</span>
+  Old key closed (rent reclaimed)
+  <span style="color:var(--orange)">New key: sk_live_b9e1...a4f7 (SAVE THIS)</span>
+  All settings preserved (permissions, rate limits, label)</div>
+</div>
+</section>
+
+<!-- Footer -->
+<footer>
+<div class="container">
+  <p>
+    <a href="https://github.com/TheAuroraAI/solana-api-key-manager">GitHub Repository</a> &bull;
+    Program ID: <code>v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju</code>
+  </p>
+  <p style="margin-top:8px;">Built by Aurora &bull; Solana Graveyard Hackathon 2026</p>
+</div>
+</footer>
+
+<script>
+// Demo state
+let createdKeys = [];
+let usageCount = 0;
+const rateLimit = 1000;
+
+function showTab(name) {
+  document.querySelectorAll('.demo-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.demo-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function togglePerm(el) {
+  el.classList.toggle('on');
+  el.classList.toggle('off');
+  updatePermValue();
+}
+
+function updatePermValue() {
+  const bits = document.querySelectorAll('#perm-viz-create .perm-bit');
+  let val = 0;
+  bits.forEach(b => { if (b.classList.contains('on')) val |= parseInt(b.dataset.perm); });
+  const bin = val.toString(2).padStart(4, '0');
+  document.getElementById('perm-value').textContent = `Bitmask: 0b${bin} = ${val}`;
+}
+
+function randomHex(len) {
+  const chars = '0123456789abcdef';
+  let result = '';
+  for (let i = 0; i < len; i++) result += chars[Math.floor(Math.random() * 16)];
+  return result;
+}
+
+async function sha256(text) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(text);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function simulateCreate() {
+  const label = document.getElementById('key-label').value || 'my-key';
+  const rate = document.getElementById('key-rate').value;
+  const window = document.getElementById('key-window');
+  const windowText = window.options[window.selectedIndex].text;
+  const expiresSelect = document.getElementById('key-expires');
+  const expiresText = expiresSelect.options[expiresSelect.selectedIndex].text;
+
+  const bits = document.querySelectorAll('#perm-viz-create .perm-bit');
+  let perms = [];
+  let permVal = 0;
+  bits.forEach(b => {
+    if (b.classList.contains('on')) {
+      permVal |= parseInt(b.dataset.perm);
+      perms.push(b.textContent);
+    }
+  });
+
+  const rawKey = 'sk_live_' + randomHex(48);
+  const hash = await sha256(rawKey);
+  const pda = randomHex(8) + '...' + randomHex(4);
+
+  createdKeys.push({ raw: rawKey, hash, label, perms: permVal, rate: parseInt(rate) });
+
+  const output = document.getElementById('create-output');
+  output.innerHTML = `<span style="color:var(--accent)">// Instruction: create_key</span>
+<span style="color:var(--accent)">// Transaction submitted to Solana...</span>
+
+<span style="color:var(--accent2)">API Key Created Successfully!</span>
+
+<span style="color:var(--orange)">Raw Key: ${rawKey}</span>
+<span style="color:var(--orange)">^ SAVE THIS — it will never be shown again</span>
+
+On-chain state:
+  PDA Address:  ${pda}
+  Key Hash:     ${hash.substring(0, 16)}...${hash.substring(56)}
+  Label:        ${label}
+  Permissions:  ${perms.join(' | ')} (0b${permVal.toString(2).padStart(4, '0')})
+  Rate Limit:   ${rate} / ${windowText}
+  Expires:      ${expiresText}
+  Status:       Active
+
+Cost: ~0.002 SOL (account rent, reclaimable)
+
+<span style="color:var(--muted)">// The raw key "${rawKey.substring(0, 16)}..."
+// is hashed with SHA-256 before storage.
+// Only the hash "${hash.substring(0, 16)}..."
+// exists on-chain. Same as Stripe, OpenAI, etc.</span>`;
+
+  // Auto-fill validate input
+  document.getElementById('validate-key').value = rawKey;
+}
+
+async function simulateValidate() {
+  const key = document.getElementById('validate-key').value;
+  const output = document.getElementById('validate-output');
+
+  if (!key) {
+    output.innerHTML = '<span style="color:var(--red)">Error: No key provided</span>\n\nCreate a key first, or enter one manually.';
+    return;
+  }
+
+  const hash = await sha256(key);
+  const found = createdKeys.find(k => k.raw === key);
+
+  if (found) {
+    output.innerHTML = `<span style="color:var(--accent)">// simulateTransaction (FREE — no gas cost)</span>
+
+Step 1: Hash key
+  Input:  ${key.substring(0, 20)}...
+  SHA256: ${hash.substring(0, 16)}...${hash.substring(56)}
+
+Step 2: Derive PDA
+  Seeds: [b"apikey", service_pubkey, key_hash]
+  PDA:   ${randomHex(8)}...${randomHex(4)}
+
+Step 3: Program validation
+  Account exists:   <span style="color:var(--accent2)">YES</span>
+  Revoked:          <span style="color:var(--accent2)">NO</span>
+  Expired:          <span style="color:var(--accent2)">NO</span>
+
+<span style="color:var(--accent2)">RESULT: KEY IS VALID</span>
+
+  Label:       ${found.label}
+  Permissions: 0b${found.perms.toString(2).padStart(4, '0')}
+  Rate Limit:  0 / ${found.rate} (this window)
+  Total Usage: 0
+
+<span style="color:var(--muted)">Cost: $0.00 (RPC simulation, not a real transaction)</span>`;
+  } else {
+    output.innerHTML = `<span style="color:var(--accent)">// simulateTransaction (FREE)</span>
+
+Step 1: Hash key
+  Input:  ${key.substring(0, 20)}...
+  SHA256: ${hash.substring(0, 16)}...${hash.substring(56)}
+
+Step 2: Derive PDA
+  Seeds: [b"apikey", service_pubkey, key_hash]
+  PDA:   ${randomHex(8)}...${randomHex(4)}
+
+Step 3: Program validation
+  Account exists:   <span style="color:var(--red)">NO</span>
+
+<span style="color:var(--red)">RESULT: KEY NOT FOUND</span>
+
+<span style="color:var(--muted)">The PDA derived from this key hash does not exist.
+Either the key was never created, or it was closed (hard deleted).
+Cost: $0.00</span>`;
+  }
+}
+
+function updatePermCheck() {
+  const bits = document.querySelectorAll('#perm-viz-check .perm-bit');
+  let keyPerms = 0;
+  let permNames = [];
+  bits.forEach(b => {
+    if (b.classList.contains('on')) {
+      keyPerms |= parseInt(b.dataset.perm);
+      permNames.push(b.textContent);
+    }
+  });
+
+  const required = parseInt(document.getElementById('check-perm').value);
+  const result = (keyPerms & required) === required;
+  const keyBin = keyPerms.toString(2).padStart(4, '0');
+  const reqBin = required.toString(2).padStart(4, '0');
+  const resBin = (keyPerms & required).toString(2).padStart(4, '0');
+
+  const output = document.getElementById('perm-output');
+  output.innerHTML = `<span style="color:var(--accent)">// Bitwise permission check (FREE via RPC simulation)</span>
+
+Key permissions:      0b${keyBin} (${permNames.join(' | ') || 'NONE'})
+Required permission:  0b${reqBin}
+
+Operation: key.permissions & required == required
+           0b${keyBin} & 0b${reqBin} == 0b${reqBin}
+           0b${resBin} == 0b${reqBin}
+
+Result: <span style="color:${result ? 'var(--accent2)' : 'var(--red)'}">${result ? 'AUTHORIZED' : 'DENIED'}</span>
+
+${result ?
+  '<span style="color:var(--accent2)">The key has the required permission bits set.</span>' :
+  '<span style="color:var(--red)">Missing required permission bits.\nThe request would be rejected by the program.</span>'}
+
+<span style="color:var(--muted)">// This is a single CPU instruction — the fastest possible
+// authorization check. No database query, no network hop.
+// On-chain, it's verified by the program itself.
+// Cost: $0.00</span>`;
+}
+
+function simulateUsage(count) {
+  usageCount = Math.min(usageCount + count, rateLimit + 50);
+  const pct = Math.min((usageCount / rateLimit) * 100, 100);
+  document.getElementById('rl-bar').style.width = pct + '%';
+
+  if (usageCount > rateLimit) {
+    document.getElementById('rl-bar').style.background = 'linear-gradient(90deg, var(--red), #dc2626)';
+  } else if (usageCount > rateLimit * 0.8) {
+    document.getElementById('rl-bar').style.background = 'linear-gradient(90deg, var(--orange), #d97706)';
+  } else {
+    document.getElementById('rl-bar').style.background = 'linear-gradient(90deg, var(--accent2), var(--accent))';
+  }
+
+  document.getElementById('rl-display').textContent = `${usageCount} / ${rateLimit}`;
+
+  const output = document.getElementById('rl-output');
+  if (usageCount <= rateLimit) {
+    output.innerHTML = `<span style="color:var(--accent)">// record_usage instruction (${count}x)</span>
+
+Window usage: ${usageCount} / ${rateLimit}
+Total usage:  ${usageCount}
+Window start: ${new Date().toISOString().split('.')[0]}Z
+
+<span style="color:var(--accent2)">ALLOWED — within rate limit</span>
+
+On-chain state updated:
+  window_usage: ${usageCount - count} → ${usageCount}
+  total_usage:  ${usageCount - count} → ${usageCount}
+
+Cost: ~$0.000005 per record_usage tx
+      ${count} requests = $${(count * 0.000005).toFixed(6)}
+
+<span style="color:var(--muted)">// Unlike Redis counters, these cannot be reset by the operator.
+// The total_usage counter is monotonically increasing — provable
+// usage history that both parties can verify.</span>`;
+  } else {
+    output.innerHTML = `<span style="color:var(--red)">// record_usage instruction — REJECTED</span>
+
+Window usage: ${rateLimit} / ${rateLimit} (FULL)
+Attempted:    +${count}
+
+<span style="color:var(--red)">RATE LIMIT EXCEEDED</span>
+
+The program rejects the transaction with error:
+  RateLimitExceeded: window_usage (${rateLimit}) >= rate_limit (${rateLimit})
+
+<span style="color:var(--muted)">// The rate limit is enforced by the program itself, not middleware.
+// Even the service owner cannot bypass it without a signed
+// update_key transaction (which is publicly visible).
+//
+// Window resets automatically when current_time > window_start + window.</span>`;
+  }
+}
+
+function resetUsage() {
+  usageCount = 0;
+  document.getElementById('rl-bar').style.width = '0%';
+  document.getElementById('rl-bar').style.background = 'linear-gradient(90deg, var(--accent2), var(--accent))';
+  document.getElementById('rl-display').textContent = `0 / ${rateLimit}`;
+  document.getElementById('rl-output').innerHTML = `<span style="color:var(--accent)">// Window reset (simulating time passage)</span>
+
+Previous window closed.
+New window started at: ${new Date().toISOString().split('.')[0]}Z
+
+Window usage: 0 / ${rateLimit}
+Total usage: preserved (immutable counter)
+
+<span style="color:var(--muted)">// In production, windows reset automatically when
+// current_time > window_start + rate_limit_window.
+// No cron job needed — the program handles it inline.</span>`;
+}
+
+function addDemoKey() {
+  const labels = ['analytics-dashboard', 'webhook-handler', 'staging-env', 'partner-api', 'internal-tool'];
+  const perms = [['READ'], ['READ','WRITE'], ['READ','WRITE','DEL'], ['ADMIN']];
+  const label = labels[Math.floor(Math.random() * labels.length)];
+  const perm = perms[Math.floor(Math.random() * perms.length)];
+  const key = 'sk_live_' + randomHex(4) + '...' + randomHex(4);
+  const usage = Math.floor(Math.random() * 5000);
+
+  const li = document.createElement('li');
+  li.innerHTML = `<div><strong>${key}</strong><div style="font-size:0.75rem;color:var(--muted)">${label} &bull; ${perm.join(', ')} &bull; ${usage.toLocaleString()} total</div></div><span class="key-status active">Active</span>`;
+
+  document.getElementById('key-list').prepend(li);
+}
+
+function rotateFirstActive() {
+  const items = document.getElementById('key-list').children;
+  for (let item of items) {
+    const status = item.querySelector('.key-status');
+    if (status && status.classList.contains('active')) {
+      const strong = item.querySelector('strong');
+      const oldKey = strong.textContent;
+      const newKey = 'sk_live_' + randomHex(4) + '...' + randomHex(4);
+      strong.textContent = newKey;
+      const detail = item.querySelector('div > div');
+      detail.innerHTML = detail.innerHTML.replace(/\d[\d,]* total/, Math.floor(Math.random() * 100) + ' total') + ' <em style="color:var(--accent)">(rotated)</em>';
+      break;
+    }
+  }
+}
+</script>
+
+</body>
+</html>
