@@ -14,7 +14,7 @@ import chalk from "chalk";
 
 // Program ID — matches deployed program
 const PROGRAM_ID = new PublicKey(
-  "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"
+  "7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58"
 );
 
 // ============================================================================

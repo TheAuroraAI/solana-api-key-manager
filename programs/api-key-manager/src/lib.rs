@@ -29,7 +29,7 @@
 
 use anchor_lang::prelude::*;
 
-declare_id!("v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju");
+declare_id!("7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58");
 
 /// Permission bits for API keys.
 /// Uses a bitmask for composable permissions in a single u16 field.

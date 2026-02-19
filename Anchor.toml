@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-api_key_manager = "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"
+api_key_manager = "7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58"
 
 [programs.localnet]
-api_key_manager = "EfnX4H95T3iWbuYe9oU4d5F5iCptFjnkFrdR59diS8YA"
+api_key_manager = "7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58"
 
 [registry]
 url = "https://api.apr.dev"

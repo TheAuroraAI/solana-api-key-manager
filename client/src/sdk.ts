@@ -16,7 +16,7 @@ import * as path from "path";
 
 /** Default program ID for the deployed API Key Manager program. */
 const DEFAULT_PROGRAM_ID = new PublicKey(
-  "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"
+  "7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58"
 );
 
 /** PDA seed prefix for ServiceConfig accounts. */
@@ -302,7 +302,7 @@ export class ApiKeyManagerSDK {
    * @param wallet - A `Keypair` or Anchor-compatible `Wallet` that will sign transactions.
    *                 When a `Keypair` is provided, it is wrapped in an Anchor `Wallet`.
    * @param programId - Optional override for the program ID. Defaults to the deployed
-   *                    program at `v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju`.
+   *                    program at `7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58`.
    */
   constructor(
     connection: Connection,
