@@ -99,7 +99,8 @@ describe("api-key-manager", () => {
         .rpc();
       expect.fail("Should have thrown");
     } catch (e: any) {
-      expect(e).to.exist;
+      // Account already initialized — Anchor rejects duplicate PDA init
+      expect(e.toString()).to.include("already in use");
     }
   });
 
@@ -133,7 +134,7 @@ describe("api-key-manager", () => {
         .rpc();
       expect.fail("Should have thrown");
     } catch (e: any) {
-      expect(e.error.errorCode.code).to.equal("NameTooLong");
+      expect(e.error.errorCode.code).to.equal("InvalidName");
     }
   });
 
@@ -162,7 +163,7 @@ describe("api-key-manager", () => {
         .rpc();
       expect.fail("Should have thrown");
     } catch (e: any) {
-      expect(e.error.errorCode.code).to.equal("NameTooLong");
+      expect(e.error.errorCode.code).to.equal("InvalidName");
     }
   });
 
@@ -357,7 +358,8 @@ describe("api-key-manager", () => {
         .rpc();
       expect.fail("Should have thrown — unauthorized");
     } catch (e: any) {
-      expect(e).to.exist;
+      // Attacker's key doesn't match service PDA seeds — constraint violation
+      expect(e.toString()).to.include("Constraint");
     }
   });
 
@@ -521,7 +523,7 @@ describe("api-key-manager", () => {
         .rpc();
       expect.fail("Should have thrown");
     } catch (e: any) {
-      expect(e.error.errorCode.code).to.equal("NameTooLong");
+      expect(e.error.errorCode.code).to.equal("InvalidName");
     }
   });
 
@@ -672,7 +674,8 @@ describe("api-key-manager", () => {
         .rpc();
       expect.fail("Should have thrown — unauthorized caller");
     } catch (e: any) {
-      expect(e).to.exist;
+      // Attacker's key doesn't match service PDA seeds — constraint violation
+      expect(e.toString()).to.include("Constraint");
     }
   });
 
@@ -1016,6 +1019,9 @@ describe("api-key-manager", () => {
   // ========================================================================
 
   it("revokes a key", async () => {
+    const serviceBefore = await program.account.serviceConfig.fetch(servicePDA);
+    const activeKeysBefore = serviceBefore.activeKeys;
+
     await program.methods
       .revokeKey()
       .accounts({
@@ -1029,7 +1035,7 @@ describe("api-key-manager", () => {
     expect(apiKey.revoked).to.equal(true);
 
     const service = await program.account.serviceConfig.fetch(servicePDA);
-    // active_keys should decrease
+    expect(service.activeKeys).to.equal(activeKeysBefore - 1);
   });
 
   it("rejects usage on revoked key", async () => {
@@ -1449,7 +1455,8 @@ describe("api-key-manager", () => {
         .rpc();
       expect.fail("Should have thrown — wrong service owner");
     } catch (e: any) {
-      expect(e).to.exist;
+      // Wrong owner doesn't match service PDA seeds
+      expect(e.toString()).to.include("Constraint");
     }
   });
 
@@ -1693,5 +1700,196 @@ describe("api-key-manager", () => {
     // Verify closed
     const closedAccount = await provider.connection.getAccountInfo(lcApiKeyPDA);
     expect(closedAccount).to.be.null;
+  });
+
+  // ========================================================================
+  // Key Rotation
+  // ========================================================================
+
+  it("rotates a key atomically", async () => {
+    const rotOwner = Keypair.generate();
+    const airdropSig = await provider.connection.requestAirdrop(
+      rotOwner.publicKey,
+      5_000_000_000
+    );
+    await provider.connection.confirmTransaction(airdropSig);
+
+    const [rotServicePDA] = findServicePDA(rotOwner.publicKey, program.programId);
+
+    await program.methods
+      .initializeService("Rotation Test", 10, 100, new anchor.BN(3600))
+      .accounts({
+        serviceConfig: rotServicePDA,
+        owner: rotOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([rotOwner])
+      .rpc();
+
+    // Create original key
+    const oldKey = generateApiKey();
+    const oldKeyHash = hashApiKey(oldKey);
+    const [oldApiKeyPDA] = findApiKeyPDA(rotServicePDA, oldKeyHash, program.programId);
+
+    await program.methods
+      .createKey(Array.from(oldKeyHash), "Original Key", 7, 500, null)
+      .accounts({
+        serviceConfig: rotServicePDA,
+        apiKey: oldApiKeyPDA,
+        owner: rotOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([rotOwner])
+      .rpc();
+
+    const serviceBefore = await program.account.serviceConfig.fetch(rotServicePDA);
+    expect(serviceBefore.activeKeys).to.equal(1);
+
+    // Rotate key
+    const newKey = generateApiKey();
+    const newKeyHash = hashApiKey(newKey);
+    const [newApiKeyPDA] = findApiKeyPDA(rotServicePDA, newKeyHash, program.programId);
+
+    await program.methods
+      .rotateKey(Array.from(oldKeyHash), Array.from(newKeyHash), null)
+      .accounts({
+        serviceConfig: rotServicePDA,
+        oldApiKey: oldApiKeyPDA,
+        newApiKey: newApiKeyPDA,
+        owner: rotOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([rotOwner])
+      .rpc();
+
+    // Old key should be revoked
+    const oldApiKey = await program.account.apiKey.fetch(oldApiKeyPDA);
+    expect(oldApiKey.revoked).to.equal(true);
+
+    // New key should inherit settings
+    const newApiKey = await program.account.apiKey.fetch(newApiKeyPDA);
+    expect(newApiKey.revoked).to.equal(false);
+    expect(newApiKey.permissions).to.equal(7);
+    expect(newApiKey.rateLimit).to.equal(500);
+    expect(newApiKey.label).to.equal("Original Key");
+
+    // active_keys should stay the same (one revoked, one created)
+    const serviceAfter = await program.account.serviceConfig.fetch(rotServicePDA);
+    expect(serviceAfter.activeKeys).to.equal(1);
+    expect(serviceAfter.totalKeysCreated).to.equal(2);
+  });
+
+  it("rotates a key with new label", async () => {
+    const rotOwner = Keypair.generate();
+    const airdropSig = await provider.connection.requestAirdrop(
+      rotOwner.publicKey,
+      5_000_000_000
+    );
+    await provider.connection.confirmTransaction(airdropSig);
+
+    const [rotServicePDA] = findServicePDA(rotOwner.publicKey, program.programId);
+
+    await program.methods
+      .initializeService("Rotation Label Test", 10, 100, new anchor.BN(3600))
+      .accounts({
+        serviceConfig: rotServicePDA,
+        owner: rotOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([rotOwner])
+      .rpc();
+
+    const oldKey = generateApiKey();
+    const oldKeyHash = hashApiKey(oldKey);
+    const [oldApiKeyPDA] = findApiKeyPDA(rotServicePDA, oldKeyHash, program.programId);
+
+    await program.methods
+      .createKey(Array.from(oldKeyHash), "Old Label", 3, null, null)
+      .accounts({
+        serviceConfig: rotServicePDA,
+        apiKey: oldApiKeyPDA,
+        owner: rotOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([rotOwner])
+      .rpc();
+
+    const newKey = generateApiKey();
+    const newKeyHash = hashApiKey(newKey);
+    const [newApiKeyPDA] = findApiKeyPDA(rotServicePDA, newKeyHash, program.programId);
+
+    await program.methods
+      .rotateKey(Array.from(oldKeyHash), Array.from(newKeyHash), "New Label")
+      .accounts({
+        serviceConfig: rotServicePDA,
+        oldApiKey: oldApiKeyPDA,
+        newApiKey: newApiKeyPDA,
+        owner: rotOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([rotOwner])
+      .rpc();
+
+    const newApiKey = await program.account.apiKey.fetch(newApiKeyPDA);
+    expect(newApiKey.label).to.equal("New Label");
+  });
+
+  // ========================================================================
+  // Clear Expiry via update_key
+  // ========================================================================
+
+  it("clears expiry by passing expires_at = 0", async () => {
+    const clearOwner = Keypair.generate();
+    const airdropSig = await provider.connection.requestAirdrop(
+      clearOwner.publicKey,
+      5_000_000_000
+    );
+    await provider.connection.confirmTransaction(airdropSig);
+
+    const [clearServicePDA] = findServicePDA(clearOwner.publicKey, program.programId);
+
+    await program.methods
+      .initializeService("Clear Expiry Test", 10, 100, new anchor.BN(3600))
+      .accounts({
+        serviceConfig: clearServicePDA,
+        owner: clearOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([clearOwner])
+      .rpc();
+
+    const key = generateApiKey();
+    const keyHash = hashApiKey(key);
+    const [apiKeyPDA] = findApiKeyPDA(clearServicePDA, keyHash, program.programId);
+
+    // Create key with expiry
+    const futureExpiry = Math.floor(Date.now() / 1000) + 86400;
+    await program.methods
+      .createKey(Array.from(keyHash), "Expiring Key", 3, null, new anchor.BN(futureExpiry))
+      .accounts({
+        serviceConfig: clearServicePDA,
+        apiKey: apiKeyPDA,
+        owner: clearOwner.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([clearOwner])
+      .rpc();
+
+    let apiKey = await program.account.apiKey.fetch(apiKeyPDA);
+    expect(apiKey.expiresAt.toNumber()).to.equal(futureExpiry);
+
+    // Clear expiry by passing 0
+    await program.methods
+      .updateKey(null, null, new anchor.BN(0))
+      .accounts({
+        serviceConfig: clearServicePDA,
+        apiKey: apiKeyPDA,
+        owner: clearOwner.publicKey,
+      })
+      .signers([clearOwner])
+      .rpc();
+
+    apiKey = await program.account.apiKey.fetch(apiKeyPDA);
+    expect(apiKey.expiresAt.toNumber()).to.equal(0); // 0 = never expires
   });
 });

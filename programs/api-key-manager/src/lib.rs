@@ -74,7 +74,7 @@ pub mod api_key_manager {
         default_rate_limit: u32,
         rate_limit_window: i64,
     ) -> Result<()> {
-        require!(name.len() > 0 && name.len() <= 32, ApiKeyError::NameTooLong);
+        require!(name.len() > 0 && name.len() <= 32, ApiKeyError::InvalidName);
         require!(max_keys > 0 && max_keys <= 10_000, ApiKeyError::InvalidConfig);
         require!(default_rate_limit > 0, ApiKeyError::InvalidConfig);
         require!(windows::is_valid(rate_limit_window), ApiKeyError::InvalidWindow);
@@ -114,7 +114,7 @@ pub mod api_key_manager {
         let service = &mut ctx.accounts.service_config;
 
         if let Some(n) = name {
-            require!(n.len() > 0 && n.len() <= 32, ApiKeyError::NameTooLong);
+            require!(n.len() > 0 && n.len() <= 32, ApiKeyError::InvalidName);
             service.name = n;
         }
         if let Some(mk) = max_keys {
@@ -136,6 +136,7 @@ pub mod api_key_manager {
             name: service.name.clone(),
             max_keys: service.max_keys,
             default_rate_limit: service.default_rate_limit,
+            rate_limit_window: service.rate_limit_window,
         });
 
         Ok(())
@@ -152,7 +153,7 @@ pub mod api_key_manager {
         rate_limit: Option<u32>,
         expires_at: Option<i64>,
     ) -> Result<()> {
-        require!(label.len() > 0 && label.len() <= 32, ApiKeyError::NameTooLong);
+        require!(label.len() > 0 && label.len() <= 32, ApiKeyError::InvalidName);
         require!(permissions::is_valid(permissions_mask), ApiKeyError::InvalidPermissions);
 
         let service = &mut ctx.accounts.service_config;
@@ -302,14 +303,12 @@ pub mod api_key_manager {
 
     /// Check if a key has a specific permission. Emits a result event.
     /// Useful for fine-grained authorization checks without reading the full account client-side.
+    /// Note: This checks revocation, expiry, and permissions but NOT rate limits.
+    /// Use `validate_key` + `record_usage` for rate-limit-aware validation.
     pub fn check_permission(ctx: Context<ValidateKey>, required_permission: u16) -> Result<()> {
         let api_key = &ctx.accounts.api_key;
 
         require!(!api_key.revoked, ApiKeyError::KeyRevoked);
-        require!(
-            api_key.permissions & required_permission == required_permission,
-            ApiKeyError::InsufficientPermissions
-        );
 
         let clock = Clock::get()?;
         if api_key.expires_at > 0 {
@@ -318,6 +317,11 @@ pub mod api_key_manager {
                 ApiKeyError::KeyExpired
             );
         }
+
+        require!(
+            api_key.permissions & required_permission == required_permission,
+            ApiKeyError::InsufficientPermissions
+        );
 
         emit!(PermissionChecked {
             service: api_key.service,
@@ -338,7 +342,10 @@ pub mod api_key_manager {
         api_key.revoked = true;
 
         let service = &mut ctx.accounts.service_config;
-        service.active_keys = service.active_keys.saturating_sub(1);
+        service.active_keys = service
+            .active_keys
+            .checked_sub(1)
+            .ok_or(ApiKeyError::Overflow)?;
 
         emit!(KeyRevoked {
             service: service.key(),
@@ -369,9 +376,14 @@ pub mod api_key_manager {
             api_key.rate_limit = limit;
         }
         if let Some(exp) = expires_at {
-            let clock = Clock::get()?;
-            require!(exp > clock.unix_timestamp, ApiKeyError::InvalidExpiry);
-            api_key.expires_at = exp;
+            if exp == 0 {
+                // Special case: 0 clears the expiry (key becomes non-expiring)
+                api_key.expires_at = 0;
+            } else {
+                let clock = Clock::get()?;
+                require!(exp > clock.unix_timestamp, ApiKeyError::InvalidExpiry);
+                api_key.expires_at = exp;
+            }
         }
 
         emit!(KeyUpdated {
@@ -385,6 +397,68 @@ pub mod api_key_manager {
         Ok(())
     }
 
+    /// Atomically rotate an API key: revoke the old key and create a new one in a single
+    /// transaction. Preserves the label, permissions, rate limit, and expiry from the old key.
+    /// This ensures zero-downtime key rotation with no window where both keys are active.
+    pub fn rotate_key(
+        ctx: Context<RotateKey>,
+        _old_key_hash: [u8; 32],
+        new_key_hash: [u8; 32],
+        new_label: Option<String>,
+    ) -> Result<()> {
+        let old_key = &mut ctx.accounts.old_api_key;
+        require!(!old_key.revoked, ApiKeyError::AlreadyRevoked);
+
+        // Revoke old key
+        old_key.revoked = true;
+
+        // Create new key inheriting old key's settings
+        let clock = Clock::get()?;
+        let new_key = &mut ctx.accounts.new_api_key;
+        new_key.service = old_key.service;
+        new_key.key_hash = new_key_hash;
+        new_key.label = if let Some(label) = new_label {
+            require!(label.len() > 0 && label.len() <= 32, ApiKeyError::InvalidName);
+            label
+        } else {
+            old_key.label.clone()
+        };
+        new_key.permissions = old_key.permissions;
+        new_key.rate_limit = old_key.rate_limit;
+        new_key.rate_limit_window = old_key.rate_limit_window;
+        new_key.window_start = clock.unix_timestamp;
+        new_key.window_usage = 0;
+        new_key.total_usage = 0;
+        new_key.created_at = clock.unix_timestamp;
+        new_key.last_used_at = 0;
+        new_key.expires_at = old_key.expires_at;
+        new_key.revoked = false;
+        new_key.bump = ctx.bumps.new_api_key;
+
+        // total_keys_created increments, active_keys stays the same (one revoked, one created)
+        let service = &mut ctx.accounts.service_config;
+        service.total_keys_created = service
+            .total_keys_created
+            .checked_add(1)
+            .ok_or(ApiKeyError::Overflow)?;
+
+        emit!(KeyRevoked {
+            service: service.key(),
+            key_hash: old_key.key_hash,
+            total_usage: old_key.total_usage,
+        });
+        emit!(KeyCreated {
+            service: service.key(),
+            key_hash: new_key_hash,
+            label: new_key.label.clone(),
+            permissions: new_key.permissions,
+            rate_limit: new_key.rate_limit,
+            expires_at: new_key.expires_at,
+        });
+
+        Ok(())
+    }
+
     /// Close an API key account and reclaim rent. Only the service owner can close keys.
     /// The account's rent-exempt balance is returned to the owner's wallet.
     /// This is a hard delete — the key cannot be recovered after closing.
@@ -393,7 +467,10 @@ pub mod api_key_manager {
         let api_key = &ctx.accounts.api_key;
 
         if !api_key.revoked {
-            service.active_keys = service.active_keys.saturating_sub(1);
+            service.active_keys = service
+                .active_keys
+                .checked_sub(1)
+                .ok_or(ApiKeyError::Overflow)?;
         }
 
         emit!(KeyClosed {
@@ -592,6 +669,35 @@ pub struct UpdateKey<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(old_key_hash: [u8; 32], new_key_hash: [u8; 32])]
+pub struct RotateKey<'info> {
+    #[account(
+        mut,
+        seeds = [b"service", owner.key().as_ref()],
+        bump = service_config.bump,
+        has_one = owner
+    )]
+    pub service_config: Account<'info, ServiceConfig>,
+    #[account(
+        mut,
+        seeds = [b"apikey", service_config.key().as_ref(), &old_key_hash],
+        bump = old_api_key.bump
+    )]
+    pub old_api_key: Account<'info, ApiKey>,
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + ApiKey::INIT_SPACE,
+        seeds = [b"apikey", service_config.key().as_ref(), &new_key_hash],
+        bump
+    )]
+    pub new_api_key: Account<'info, ApiKey>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct CloseKey<'info> {
     #[account(
         mut,
@@ -631,6 +737,7 @@ pub struct ServiceUpdated {
     pub name: String,
     pub max_keys: u32,
     pub default_rate_limit: u32,
+    pub rate_limit_window: i64,
 }
 
 #[event]
@@ -698,7 +805,7 @@ pub struct KeyClosed {
 #[error_code]
 pub enum ApiKeyError {
     #[msg("Name must be 1-32 characters")]
-    NameTooLong,
+    InvalidName,
     #[msg("Invalid configuration value")]
     InvalidConfig,
     #[msg("Rate limit window must be 60, 3600, or 86400 seconds")]

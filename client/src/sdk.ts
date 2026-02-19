@@ -891,6 +891,152 @@ export class ApiKeyManagerSDK {
   }
 
   /**
+   * Validate an API key via RPC simulation — zero transaction fee.
+   * This is the recommended way to check if a key is valid in production.
+   * Uses `connection.simulateTransaction()` to execute the `validate_key` instruction
+   * without submitting it to the network, making it free and fast (~100ms).
+   *
+   * @param rawKey - The raw API key string to validate.
+   * @param serviceOwner - Optional owner public key if validating a key from a different service.
+   * @returns An object with `valid` (boolean) and `error` (string if invalid).
+   */
+  public async simulateValidateKey(
+    rawKey: string,
+    serviceOwner?: PublicKey
+  ): Promise<{ valid: boolean; error?: string }> {
+    const owner = serviceOwner ?? this.walletPublicKey;
+    const [servicePDA] = findServiceConfigPDA(owner, this.programId);
+    const keyHash = hashApiKey(rawKey);
+    const [apiKeyPDA] = findApiKeyPDA(servicePDA, keyHash, this.programId);
+
+    try {
+      const tx = await this.program.methods
+        .validateKey()
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDA,
+        })
+        .transaction();
+
+      tx.feePayer = this.walletPublicKey;
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+
+      const result = await this.connection.simulateTransaction(tx);
+
+      if (result.value.err) {
+        // Parse the error from simulation logs
+        const logs = result.value.logs || [];
+        const errorLog = logs.find((l: string) => l.includes("Error Message:"));
+        const errorMsg = errorLog
+          ? errorLog.split("Error Message: ")[1]
+          : "Validation failed";
+        return { valid: false, error: errorMsg };
+      }
+
+      return { valid: true };
+    } catch (e: any) {
+      return { valid: false, error: e.message || "Simulation failed" };
+    }
+  }
+
+  /**
+   * Check permission via RPC simulation — zero transaction fee.
+   * Same as `checkPermission` but uses simulation instead of submitting a transaction.
+   *
+   * @param rawKey - The raw API key string to check.
+   * @param requiredPermission - The permission bitmask to check for.
+   * @param serviceOwner - Optional owner public key if checking a different service's key.
+   * @returns An object with `hasPermission` (boolean) and `error` (string if denied).
+   */
+  public async simulateCheckPermission(
+    rawKey: string,
+    requiredPermission: number,
+    serviceOwner?: PublicKey
+  ): Promise<{ hasPermission: boolean; error?: string }> {
+    const owner = serviceOwner ?? this.walletPublicKey;
+    const [servicePDA] = findServiceConfigPDA(owner, this.programId);
+    const keyHash = hashApiKey(rawKey);
+    const [apiKeyPDA] = findApiKeyPDA(servicePDA, keyHash, this.programId);
+
+    try {
+      const tx = await this.program.methods
+        .checkPermission(requiredPermission)
+        .accounts({
+          serviceConfig: servicePDA,
+          apiKey: apiKeyPDA,
+        })
+        .transaction();
+
+      tx.feePayer = this.walletPublicKey;
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+
+      const result = await this.connection.simulateTransaction(tx);
+
+      if (result.value.err) {
+        const logs = result.value.logs || [];
+        const errorLog = logs.find((l: string) => l.includes("Error Message:"));
+        const errorMsg = errorLog
+          ? errorLog.split("Error Message: ")[1]
+          : "Permission check failed";
+        return { hasPermission: false, error: errorMsg };
+      }
+
+      return { hasPermission: true };
+    } catch (e: any) {
+      return { hasPermission: false, error: e.message || "Simulation failed" };
+    }
+  }
+
+  /**
+   * Atomically rotate an API key: revoke the old key and create a new one in a
+   * single transaction. The new key inherits the old key's permissions, rate limit,
+   * and expiry. The `active_keys` counter stays the same.
+   *
+   * This ensures zero-downtime key rotation with no window where both keys are active.
+   *
+   * @param oldRawKey - The raw API key string of the key to revoke.
+   * @param params - Optional parameters for the new key.
+   * @param params.newLabel - Label for the new key. Defaults to the old key's label.
+   * @returns The transaction signature, new raw key, key hash, and PDA address.
+   */
+  public async rotateKey(
+    oldRawKey: string,
+    params?: { newLabel?: string }
+  ): Promise<CreateKeyResult> {
+    const [servicePDA] = this.getServiceConfigPDA();
+    const oldKeyHash = hashApiKey(oldRawKey);
+    const [oldApiKeyPDA] = findApiKeyPDA(servicePDA, oldKeyHash, this.programId);
+
+    const newRawKey = generateApiKey();
+    const newKeyHash = hashApiKey(newRawKey);
+    const [newApiKeyPDA] = findApiKeyPDA(servicePDA, newKeyHash, this.programId);
+
+    const signature = await this.program.methods
+      .rotateKey(
+        Array.from(oldKeyHash),
+        Array.from(newKeyHash),
+        params?.newLabel ?? null
+      )
+      .accounts({
+        serviceConfig: servicePDA,
+        oldApiKey: oldApiKeyPDA,
+        newApiKey: newApiKeyPDA,
+        owner: this.walletPublicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return {
+      signature,
+      rawKey: newRawKey,
+      keyHash: newKeyHash,
+      apiKeyAddress: newApiKeyPDA,
+    };
+  }
+
+  /**
    * Close an API key account and reclaim its rent-exempt SOL balance.
    * This is a hard delete -- the key account is permanently removed from the blockchain
    * and cannot be recovered. The rent lamports are returned to the service owner's wallet.

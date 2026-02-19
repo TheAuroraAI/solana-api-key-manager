@@ -9,7 +9,7 @@ skip-lint = false
 api_key_manager = "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"
 
 [programs.localnet]
-api_key_manager = "v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju"
+api_key_manager = "EfnX4H95T3iWbuYe9oU4d5F5iCptFjnkFrdR59diS8YA"
 
 [registry]
 url = "https://api.apr.dev"

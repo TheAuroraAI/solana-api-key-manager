@@ -315,14 +315,15 @@ The on-chain system becomes expensive when:
 │                   v73KoPncjCfhWRkf2QPag15NcFx3oMsRevYtYoGReju│
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
-│  Instructions (9):                                           │
+│  Instructions (10):                                          │
 │  ├── initialize_service   → Create ServiceConfig PDA         │
 │  ├── update_service       → Modify service config            │
 │  ├── create_key           → Create ApiKey PDA                │
 │  ├── validate_key         → Check validity (read-only)       │
 │  ├── check_permission     → Verify specific permissions      │
 │  ├── record_usage         → Increment usage counter          │
-│  ├── update_key           → Modify permissions/limits        │
+│  ├── update_key           → Modify permissions/limits/expiry │
+│  ├── rotate_key           → Atomic revoke + create (new!)    │
 │  ├── revoke_key           → Soft-disable a key               │
 │  └── close_key            → Delete key, reclaim rent         │
 │                                                              │
@@ -336,7 +337,7 @@ The on-chain system becomes expensive when:
 │  ├── UsageRecorded, KeyUpdated, KeyRevoked, KeyClosed        │
 │                                                              │
 │  Errors (13):                                                │
-│  ├── NameTooLong, InvalidConfig, InvalidWindow               │
+│  ├── InvalidName, InvalidConfig, InvalidWindow               │
 │  ├── MaxKeysReached, KeyRevoked, KeyExpired                  │
 │  ├── RateLimitExceeded, InvalidExpiry, AlreadyRevoked        │
 │  ├── InvalidService, Overflow                                │
@@ -358,7 +359,7 @@ The on-chain system becomes expensive when:
 anchor build
 ```
 
-### Test (49 test cases, local validator)
+### Test (52 test cases, local validator)
 ```bash
 npm install
 anchor test --validator legacy
@@ -372,6 +373,8 @@ Test coverage:
 - **Access control**: unauthorized usage recording, unauthorized service updates
 - **Edge cases**: empty name, zero max_keys, invalid window, past expiry, invalid bits
 - **Rent reclamation**: close key returns SOL, active_keys decremented correctly
+- **Key rotation**: atomic rotate_key (revoke + create), label override
+- **Expiry clearing**: update_key with expires_at=0 to remove expiry
 - **Full integration**: create → validate → use → check permission → update → revoke → close
 
 ### Deploy to Devnet
@@ -411,12 +414,15 @@ const { rawKey, apiKeyAddress } = await sdk.createKey({
   rateLimit: 500,
 });
 
-// Validate and check permissions (anyone can do this — free RPC read)
-await sdk.validateKey(rawKey);
-await sdk.checkPermission(rawKey, Permission.WRITE);
+// Validate via simulation — FREE, no transaction fee (~100ms)
+const { valid, error } = await sdk.simulateValidateKey(rawKey);
+const { hasPermission } = await sdk.simulateCheckPermission(rawKey, Permission.WRITE);
 
 // Record usage (owner only — costs ~$0.000005)
 await sdk.recordUsage(rawKey);
+
+// Rotate a key atomically — old key revoked, new key inherits settings
+const { rawKey: newKey } = await sdk.rotateKey(rawKey);
 
 // Fetch account data
 const service = await sdk.fetchServiceConfig();
@@ -424,7 +430,8 @@ const allKeys = await sdk.fetchAllApiKeys();
 ```
 
 The SDK exports:
-- `ApiKeyManagerSDK` class with methods for all 9 instructions
+- `ApiKeyManagerSDK` class with methods for all 10 instructions
+- `simulateValidateKey()` and `simulateCheckPermission()` for free validation via RPC simulation
 - `Permission` constants (`READ`, `WRITE`, `DELETE`, `ADMIN`, `ALL`)
 - `RateLimitWindow` constants (`ONE_MINUTE`, `ONE_HOUR`, `ONE_DAY`)
 - PDA derivation helpers
@@ -548,7 +555,7 @@ Events can be indexed by Helius, Shyft, or geyser plugins for dashboards, analyt
 
 ```
 ├── programs/api-key-manager/src/lib.rs   # Solana program (~710 lines)
-├── tests/api-key-manager.ts              # 49 test cases
+├── tests/api-key-manager.ts              # 52 test cases
 ├── client/
 │   └── src/
 │       ├── cli.ts                        # 12-command CLI client
