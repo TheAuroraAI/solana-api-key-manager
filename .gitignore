@@ -6,5 +6,4 @@ node_modules
 test-ledger
 .yarn
 client/dist
-scripts/make_video.py
-scripts/pitch_v8_script.txt
+*.mp4

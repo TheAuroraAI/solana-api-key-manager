@@ -605,7 +605,24 @@ Events can be indexed by Helius, Shyft, or geyser plugins for dashboards, analyt
 
 - **Program ID**: `7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58`
 - **Cluster**: Devnet
-- **Example transactions**: *(pending devnet SOL — faucet rate-limited globally)*
+- **Authority**: `GpXHXs5KfzfXbNKcMLNbAMsJsgPsBE7y5GtwVoiuxYvH`
+- **Explorer**: [View on Solana Explorer](https://explorer.solana.com/address/7uXfzJUYdVT3sENNzNcUPk7upa3RUzjB8weCBEeFQt58?cluster=devnet)
+
+### Transaction Evidence (All Write Instructions Tested)
+
+| Instruction | Transaction |
+|-------------|-------------|
+| `initialize_service` | [`5J5GZh85...SzoX7`](https://explorer.solana.com/tx/5J5GZh859zxcT445JsDhjCbGh8wkPvped21av6fzSyMybDKuHXXswKM1dZjPt3tE935GeWPB9pUATL35csKSzoX7?cluster=devnet) |
+| `create_key` | [`34Y1Ka2g...ck72`](https://explorer.solana.com/tx/34Y1Ka2gUY4oZjkhdsAcDAyqvyTHVNXiJ8X6LCuoy5Drtzd7wREpcmNmTUrbBS7TBofKv9548a2HvxmEKBgdck72?cluster=devnet) |
+| `record_usage` | [`2uTjtdnN...yN8w`](https://explorer.solana.com/tx/2uTjtdnNU6ZHABSWZ6KiwujAamDZo5PyfJAMxkNGDrqcyRBbHeqMfh8dyFT1jsrueGYqwLsgxkjZrztCaiVdyN8w?cluster=devnet) |
+| `update_key` | [`38hAGUsj...3puN`](https://explorer.solana.com/tx/38hAGUsjeF1um1YKcY9JWvxpYjet7rgkk2D5N9qchvhhqeb1sYg9EzRDJ7c2rH3zSxwy7GAsuBbXVwf8ez7D3puN?cluster=devnet) |
+| `create_key` (2nd) | [`49ZfQ7j3...8zU1`](https://explorer.solana.com/tx/49ZfQ7j3UDJD5CJBtxc6omKwDme3mE8ZfSmrpoBH2LYpJtRwtVvg9BksHgVNVEXDL95Jw9cMF5hiEu1Cv1Nt8zU1?cluster=devnet) |
+| `revoke_key` | [`2LYKGpqc...ht3cu`](https://explorer.solana.com/tx/2LYKGpqcCo6AGZcXMi7zNNq6GgqGHdzLAHoDEr1EEzEBNfuJsyHGoKSCEgfWBtYC6N6RWGx2BAJzpNJe3q6ht3cu?cluster=devnet) |
+| `close_key` | [`4NHr1FMy...x3xb`](https://explorer.solana.com/tx/4NHr1FMy6Aku4YH8LBHntktZfsCTibgFWhfEzRL8MDNYxL6u5jjfYyKix9hM8xx69QzBcvxSfkExnZEGUZHrx3xb?cluster=devnet) |
+
+Read operations (`validate_key`, `check_permission`) are free via RPC simulation — no transaction needed.
+
+See [DEVNET_EVIDENCE.md](./DEVNET_EVIDENCE.md) for full deployment details.
 
 ## Repository Structure
 
@@ -616,8 +633,13 @@ Events can be indexed by Helius, Shyft, or geyser plugins for dashboards, analyt
 │   └── src/
 │       ├── cli.ts                        # 13-command CLI client
 │       └── sdk.ts                        # TypeScript SDK (~1,210 lines)
+├── docs/
+│   └── index.html                        # Interactive dashboard (GitHub Pages)
 ├── scripts/
-│   └── deploy-devnet.sh                  # Automated deployment + smoke test
+│   ├── deploy-devnet.sh                  # Automated deployment + smoke test
+│   ├── deploy-and-test.sh                # Full deploy + CLI smoke test
+│   └── try-airdrop.sh                    # Devnet SOL airdrop helper
+├── DEVNET_EVIDENCE.md                    # Devnet deployment proof + tx links
 ├── Anchor.toml                           # Anchor configuration
 └── README.md                             # This file
 ```
