@@ -644,6 +644,40 @@ See [DEVNET_EVIDENCE.md](./DEVNET_EVIDENCE.md) for full deployment details.
 └── README.md                             # This file
 ```
 
+## Key Insights From the Web2 → Solana Translation
+
+After implementing a production-grade API key system on-chain, these are the non-obvious insights:
+
+### 1. The Trust Model Inversion Is More Radical Than It Sounds
+
+In Web2, the operator is the implicit trusted party — users trust that Stripe hasn't secretly changed their API key's rate limits. On-chain, **the program is the trusted party**, and the operator cannot override it. This sounds like a small shift but it fundamentally changes the security model: `record_usage` must be owner-gated or anyone could DoS your keys by burning your rate limit. Web2 middleware assumes operator loyalty; on-chain middleware assumes operator adversity.
+
+### 2. PDA Derivation Replaces Database Indexing — And It's Better in Specific Ways
+
+`seeds = [b"apikey", service_pubkey, key_hash]` means the PDA address is deterministically computable from any API key, in O(1), without a network call. In PostgreSQL, this is a hash index — but the index can be dropped, corrupted, or operated against. The PDA derivation is enforced by the runtime and can't be bypassed. For lookups of the form "is this key valid?", on-chain beats any database.
+
+### 3. Free Reads Are the Critical Insight
+
+The most frequent operation — validating a key — is **free** via `simulateTransaction`. Web2 rate limiting middleware processes millions of requests/day; if each required a paid transaction, on-chain would be unusable. The fact that Solana's RPC simulation returns instruction results without broadcasting (and without fees) makes the entire architecture viable. Without this, the cost model breaks at any meaningful scale.
+
+### 4. Fixed-Window Rate Limiting Is Architecturally Forced
+
+Sliding window rate limits (Redis ZRANGEBYSCORE + ZREMRANGEBYSCORE) work because Redis is mutable shared state with atomic operations. On-chain, each state change is a transaction — there's no equivalent of a multi-step atomic Redis pipeline. Fixed windows (`window_start` + `window_usage` as two fields) are not a compromise; they're the correct data model for blockchain storage. The lesson: don't try to port data structures — translate the invariant.
+
+### 5. Rent Creates an Incentive Structure Web2 Doesn't Have
+
+Every ApiKey PDA locks ~0.002 SOL as rent. At 10,000 keys, that's 20 SOL locked. The `close_key` instruction returns this rent to the owner — which creates a real economic incentive to clean up expired/revoked keys. Web2 systems accumulate "soft-deleted" rows in databases indefinitely because deletion has no benefit. On-chain, deletion has direct value (rent reclaimed). This aligns developer incentives with data hygiene in a way that database architectures don't.
+
+### 6. What Maps Badly: Complex Queries and Private State
+
+`GET /keys?created_after=2024-01-01&permissions=READ&active=true` is trivial in SQL. On-chain, there's no query layer — you'd need to iterate all ApiKey PDAs and filter client-side. For audit logs, access patterns, and analytics, you need an off-chain indexer (Helius, Shyft) that reads on-chain events. The lesson: **on-chain is a write log, not a query engine**. Design your architecture around event emission + off-chain indexing rather than expecting SQL-like queries.
+
+### 7. The Rotation Primitive Demonstrates On-Chain's Composition Advantage
+
+`rotate_key` atomically revokes the old key and creates a new one in a **single transaction**. In Web2, atomic key rotation requires database transactions + careful ordering to prevent race conditions where a request hits after revocation but before the new key is live. On-chain, atomicity is guaranteed at the protocol level. This is one case where on-chain is architecturally simpler.
+
+---
+
 ## Business Model
 
 This system is designed as a **protocol-level primitive**, not just a project. Three viable monetization paths:
